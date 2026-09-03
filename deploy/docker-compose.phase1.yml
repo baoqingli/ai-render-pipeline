@@ -1,8 +1,11 @@
 # deploy/docker-compose.phase1.yml
 services:
   # OPTIONAL — LLM 切换项（spec D4）：Phase 1 默认走 GLM API（key 在 .env 的
-  # ARP_LLM_API_KEY），无需 vllm。仅当成本敏感/数据不出内网需要自部署 Qwen 时启用。
+  # ARP_LLM_API_KEY），无需 vllm。仅当成本敏感/数据不出内网需要自部署 Qwen 时启用：
+  #   docker compose -f deploy/docker-compose.phase1.yml --profile vllm up -d
+  # 普通 `up -d` 因 profiles 不启动 vllm，避免与 ComfyUI 争抢显存。
   vllm:
+    profiles: ["vllm"]
     image: vllm/vllm-openai:latest
     command: ["--model", "Qwen/Qwen2.5-7B-Instruct", "--max-model-len", "8192"]
     ports: ["8001:8000"]

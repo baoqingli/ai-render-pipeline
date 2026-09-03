@@ -39,7 +39,7 @@ requires-dist = [
     { name = "langchain-core", specifier = ">=0.3" },
     { name = "langchain-openai", specifier = ">=0.3" },
     { name = "langgraph", specifier = ">=0.2" },
-    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.1" },
@@ -48,7 +48,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "mypy", specifier = ">=1.10" },
+    { name = "mypy", specifier = ">=1.12" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "respx", specifier = ">=0.21" },
