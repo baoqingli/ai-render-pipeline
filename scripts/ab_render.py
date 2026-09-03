@@ -20,7 +20,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
-from app.engines.comfy import ComfyEngine
+from app.engines.comfy import (
+    DEFAULT_CHECKPOINT,
+    DEFAULT_CONTROLNET_DEPTH,
+    DEFAULT_CONTROLNET_LINEART,
+    ComfyEngine,
+)
 from app.engines.comfy_client import ComfyClient
 from app.engines.direct_api import (
     ApiAdapter,
@@ -78,15 +83,15 @@ async def main() -> None:
     ap.add_argument("--description", required=True)
     ap.add_argument("--models", default=None, help="逗号分隔 model_id 过滤")
     ap.add_argument(
-        "--checkpoint", default="sd_xl_base_1.0.safetensors",
+        "--checkpoint", default=DEFAULT_CHECKPOINT,
         help="ComfyUI checkpoint 文件名（默认 SDXL 家族组合；实际以操作者"
              "下载到 deploy/comfy-models/checkpoints 的文件名为准，按需覆盖）")
     ap.add_argument(
-        "--controlnet-depth", default="xinsir/controlnet-depth-sdxl-1.0.safetensors",
+        "--controlnet-depth", default=DEFAULT_CONTROLNET_DEPTH,
         help="depth ControlNet 文件名（须与 checkpoint 同家族，SDXL 默认；"
              "以操作者下载到 controlnet/ 的文件名为准）")
     ap.add_argument(
-        "--controlnet-lineart", default="xinsir/controlnet-lineart-sdxl-1.0.safetensors",
+        "--controlnet-lineart", default=DEFAULT_CONTROLNET_LINEART,
         help="lineart ControlNet 文件名（须与 checkpoint 同家族，SDXL 默认；"
              "以操作者下载到 controlnet/ 的文件名为准）")
     ap.add_argument("--variants", type=int, default=2)

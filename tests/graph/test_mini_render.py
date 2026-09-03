@@ -53,8 +53,9 @@ async def test_mini_graph_produces_report(tmp_path, monkeypatch):
     final = await g.ainvoke({"description": "warm wood", "control_dir": str(tmp_path / "ctrl"),
                              "variants": 1, "report_dir": str(tmp_path)})
     assert len(final["results"]) == 2       # 1 view × 1 variant × 2 models
-    assert Path(final["report_path"]).exists()
-    assert "sdxl-control-v1" in Path(final["report_path"]).read_text(encoding="utf-8")
+    assert Path(final["report_path"]).exists()  # noqa: ASYNC240
+    report_text = Path(final["report_path"]).read_text(encoding="utf-8")  # noqa: ASYNC240
+    assert "sdxl-control-v1" in report_text
 
 
 async def test_mini_graph_fail_soft(tmp_path, monkeypatch):
@@ -84,5 +85,5 @@ async def test_mini_graph_fail_soft(tmp_path, monkeypatch):
     codes = {r.model_id: r.error_code for r in final["results"]}
     assert codes["sdxl-control-v1"] == "COMFY_ERROR"
     assert codes["nano-banana-2"].startswith("ENGINE_RAISED")
-    report = Path(final["report_path"]).read_text(encoding="utf-8")
+    report = Path(final["report_path"]).read_text(encoding="utf-8")  # noqa: ASYNC240
     assert "成功率 0/2" in report and "COMFY_ERROR" in report

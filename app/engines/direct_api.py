@@ -22,7 +22,8 @@ class GeminiAdapter:
 
     async def generate(self, prompt: PromptPair, image: Path, model_name: str,
                        http: httpx.AsyncClient) -> bytes:
-        b64 = base64.b64encode(image.read_bytes()).decode()
+        # 本地图一次性读入后上传，Phase 1 不引入线程池开销
+        b64 = base64.b64encode(image.read_bytes()).decode()  # noqa: ASYNC240
         resp = await http.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
             params={"key": self.api_key},
@@ -44,7 +45,8 @@ class OpenAIImageAdapter:
 
     async def generate(self, prompt: PromptPair, image: Path, model_name: str,
                        http: httpx.AsyncClient) -> bytes:
-        with open(image, "rb") as fh:
+        # 本地图一次性上传，Phase 1 不引入线程池开销
+        with open(image, "rb") as fh:  # noqa: ASYNC230
             resp = await http.post(
                 f"{self.base_url}/images/edits",
                 headers={"Authorization": f"Bearer {self.api_key}"},
@@ -82,7 +84,7 @@ class DirectAPIEngine:
                                 model_id=task.model_id, ok=True, image_path=str(out),
                                 latency_ms=int((time.monotonic() - start) * 1000),
                                 cost_usd=info.price_per_image)
-        except Exception:
+        except Exception:  # noqa: BLE001 — fail-soft：适配器异常转 ok=False，不阻塞扇出
             return RenderResult(view_id=task.view_id, variant_id=task.variant_id,
                                 model_id=task.model_id, ok=False, error_code="API_ERROR",
                                 latency_ms=int((time.monotonic() - start) * 1000))

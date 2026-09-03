@@ -8,14 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from app.models.tooling import Metrics  # noqa: F401  (保持依赖方向)
 
 SEED = [
-    dict(model_id="sdxl-control-v1", engine="comfy", workflow_template="sdxl-control-v1.json",
-         prompt_variant="default", max_concurrency=1),
-    dict(model_id="nano-banana-2", engine="direct_api", provider="gemini",
-         model_name="gemini-3.1-flash-image", prompt_variant="api", max_concurrency=5,
-         price_per_image=0.03),
-    dict(model_id="gpt-image-2", engine="direct_api", provider="openai",
-         model_name="gpt-image-2", prompt_variant="api", max_concurrency=5,
-         price_per_image=0.08),
+    {"model_id": "sdxl-control-v1", "engine": "comfy",
+     "workflow_template": "sdxl-control-v1.json",
+     "prompt_variant": "default", "max_concurrency": 1},
+    {"model_id": "nano-banana-2", "engine": "direct_api", "provider": "gemini",
+     "model_name": "gemini-3.1-flash-image", "prompt_variant": "api",
+     "max_concurrency": 5, "price_per_image": 0.03},
+    {"model_id": "gpt-image-2", "engine": "direct_api", "provider": "openai",
+     "model_name": "gpt-image-2", "prompt_variant": "api", "max_concurrency": 5,
+     "price_per_image": 0.08},
 ]
 
 _meta = MetaData()
@@ -59,7 +60,8 @@ class ModelRegistry:
 
     async def list_enabled(self) -> list[ModelInfo]:
         async with self._engine.connect() as conn:
-            rows = (await conn.execute(select(_TABLE).where(_TABLE.c.enabled == 1))).mappings().all()
+            rows = (await conn.execute(
+                select(_TABLE).where(_TABLE.c.enabled == 1))).mappings().all()
         models: list[ModelInfo] = []
         for r in rows:
             data: dict[str, Any] = {k: (bool(v) if k == "enabled" else v) for k, v in r.items()}
@@ -68,7 +70,8 @@ class ModelRegistry:
 
     async def get(self, model_id: str) -> ModelInfo | None:
         async with self._engine.connect() as conn:
-            row = (await conn.execute(select(_TABLE).where(_TABLE.c.model_id == model_id))).mappings().first()
+            row = (await conn.execute(select(_TABLE).where(
+                _TABLE.c.model_id == model_id))).mappings().first()
         if row is None:
             return None
         data: dict[str, Any] = {k: (bool(v) if k == "enabled" else v) for k, v in row.items()}

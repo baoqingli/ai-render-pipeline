@@ -1,10 +1,10 @@
 # tests/unit/test_direct_api.py
-import base64, time
+import base64
+
 import httpx
 import pytest
 
-from app.engines.direct_api import (
-    DirectAPIEngine, GeminiAdapter, OpenAIImageAdapter)
+from app.engines.direct_api import DirectAPIEngine, GeminiAdapter
 from app.engines.registry import ModelInfo
 from app.infra.pools import TokenBucket
 from app.models.rendering import PromptPair, RenderTask
@@ -22,7 +22,8 @@ def gemini_handler(request: httpx.Request) -> httpx.Response:
 
 
 async def test_gemini_adapter_roundtrip(tmp_path):
-    img = tmp_path / "white.png"; img.write_bytes(b"PNG")
+    img = tmp_path / "white.png"
+    img.write_bytes(b"PNG")
     http = httpx.AsyncClient(transport=httpx.MockTransport(gemini_handler))
     engine = DirectAPIEngine(http=http, adapters={"gemini": GeminiAdapter("k")},
                              limiter=TokenBucket(600))
@@ -33,7 +34,8 @@ async def test_gemini_adapter_roundtrip(tmp_path):
 
 
 async def test_unknown_provider_fails_soft(tmp_path):
-    img = tmp_path / "w.png"; img.write_bytes(b"x")
+    img = tmp_path / "w.png"
+    img.write_bytes(b"x")
     http = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     engine = DirectAPIEngine(http=http, adapters={}, limiter=TokenBucket(600))
     info = ModelInfo(model_id="x", engine="direct_api", provider="nope")

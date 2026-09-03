@@ -14,9 +14,16 @@ TASK = RenderTask(view_id="v1", variant_id="var0", model_id="sdxl-control-v1",
 
 
 class FakeClient:
-    def __init__(self): self.uploaded = []
-    async def upload_image(self, path): self.uploaded.append(path); return path
-    async def queue_prompt(self, wf): self.wf = wf; return "pid"
+    def __init__(self):
+        self.uploaded = []
+
+    async def upload_image(self, path):
+        self.uploaded.append(path)
+        return path
+
+    async def queue_prompt(self, wf):
+        self.wf = wf
+        return "pid"
     # Adapted from the brief: Task 8's ComfyClient.wait_for_result returns the
     # full node-id -> outputs mapping, so the fake mirrors {"13": {"images": [...]}}.
     async def wait_for_result(self, pid, poll_s=1.0):
@@ -29,7 +36,7 @@ async def test_submit_writes_image_and_returns_ok(tmp_path):
     engine = ComfyEngine(client=fake, template_dir=Path("workflows"), out_dir=tmp_path)
     result = await engine.submit(TASK, INFO)
     assert result.ok and result.image_path is not None
-    assert Path(result.image_path).read_bytes() == b"PNG"
+    assert Path(result.image_path).read_bytes() == b"PNG"  # noqa: ASYNC240
     assert Path(result.image_path).name == "v1_var0_sdxl-control-v1_7.png"
     assert fake.uploaded == ["d.png", "l.png"]
     assert fake.wf["11"]["inputs"]["seed"] == 7

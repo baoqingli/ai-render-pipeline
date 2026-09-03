@@ -61,7 +61,8 @@ def plan_tasks(style: StyleParams, views: list[dict], models: list[ModelInfo],
     return tasks
 
 
-def build_mini_graph(engines: dict[str, object], registry_models: list[ModelInfo]) -> CompiledStateGraph:
+def build_mini_graph(engines: dict[str, object],
+                     registry_models: list[ModelInfo]) -> CompiledStateGraph:
     async def style_node(state: MiniState) -> dict:
         out: StyleAgentOutput = run_style_agent(state["description"])
         return {"style": out.params, "fallbacks": out.fallbacks}
@@ -100,7 +101,8 @@ def build_mini_graph(engines: dict[str, object], registry_models: list[ModelInfo
 
     async def report_node(state: MiniState) -> dict:
         report_dir = Path(state.get("report_dir") or "experiments/phase1")
-        report_dir.mkdir(parents=True, exist_ok=True)
+        # 报告目录一次性建目录，Phase 1 不引入线程池开销
+        report_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
         # 0 个视图/任务时 results 通道从未写入（state 里无该键），用 get 兜底以保持 fail-soft
         results: list[RenderResult] = state.get("results") or []
         lines = ["# Phase 1 A/B 渲染报告", "",

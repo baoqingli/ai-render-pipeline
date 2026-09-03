@@ -1,7 +1,6 @@
 # tests/unit/test_comfy_client.py
-import json
-import pytest
 import httpx
+import pytest
 
 from app.engines.comfy_client import ComfyClient, ComfyError
 

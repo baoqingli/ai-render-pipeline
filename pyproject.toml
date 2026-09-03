@@ -27,6 +27,17 @@ pythonpath = ["."]
 line-length = 100
 target-version = "py312"
 
+# 终审 Important #2：ruff 0.16 默认规则集漂移（本分支第三次工具漂移），
+# 显式钉住规则范围，保证 lint 门禁可复现
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "ASYNC", "SIM", "RUF", "BLE"]
+# BLE 超出评审给的清单，但本分支既定的 fail-soft 模式用 `# noqa: BLE001`
+# 抑制（见 app/agents/style/graph.py）：不启用 BLE 则这些 noqa 会被 RUF100
+# 判为 unused，与终审要求的「补 noqa」方向矛盾，故一并钉入。
+allowed-confusables = ["，", "：", "；", "（", "）", "×"]
+# 中文注释/文案按惯例使用全角标点（RUF001-003 全量误报），以上白名单放行；
+# 其余易混字符（如同形异义字母）仍受 RUF001-003 约束。
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true

@@ -1,7 +1,6 @@
 # app/engines/comfy_client.py
 import asyncio
 import time
-from pathlib import Path
 
 import httpx
 
@@ -40,7 +39,8 @@ class ComfyClient:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout_s)
 
     async def upload_image(self, path: str) -> str:
-        with open(path, "rb") as fh:
+        # 控制图一次性小文件上传，Phase 1 不引入线程池开销
+        with open(path, "rb") as fh:  # noqa: ASYNC230
             resp = await self._client.post(
                 "/upload/image", files={"image": fh}, data={"overwrite": "true"})
         resp.raise_for_status()

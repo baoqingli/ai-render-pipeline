@@ -1,8 +1,5 @@
 # app/models/tooling.py
-from typing import Generic, TypeVar
 from pydantic import BaseModel
-
-T = TypeVar("T")
 
 
 class Metrics(BaseModel):
@@ -16,7 +13,8 @@ class ToolError(BaseModel):
     retryable: bool = False
 
 
-class ToolResult(BaseModel, Generic[T]):
+# PEP 695 原生类型参数（Python 3.12）
+class ToolResult[T](BaseModel):
     ok: bool
     data: T | None = None
     error: ToolError | None = None

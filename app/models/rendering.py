@@ -1,12 +1,14 @@
 # app/models/rendering.py
 import hashlib
 import json
+from typing import Literal
+
 from pydantic import BaseModel
-from typing_extensions import Literal
 
 
 class StyleParams(BaseModel):
-    style: Literal["modern_minimal", "cream", "wood", "french", "wabi_sabi", "light_luxury"] = "modern_minimal"
+    style: Literal["modern_minimal", "cream", "wood", "french", "wabi_sabi",
+                   "light_luxury"] = "modern_minimal"
     floor: Literal["wood_floor", "microcement", "marble", "tile"] = "wood_floor"
     wall: Literal["white", "art_paint", "wood_veneer", "stone"] = "white"
     light: Literal["warm", "natural", "no_main_light", "cool"] = "warm"
