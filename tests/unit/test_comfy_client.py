@@ -48,3 +48,52 @@ async def test_timeout_raises_comfy_error():
     c._timeout = 0.05
     with pytest.raises(ComfyError):
         await c.wait_for_result("never", poll_s=0.02)
+
+
+async def test_execution_error_in_messages_fails_fast():
+    """终审 Important #4：执行错误（坏权重/OOM）出现在 status.messages 时
+    立即抛 COMFY_ERROR（携带 node_type/exception_message），不等满超时。"""
+    def handler(request):
+        return httpx.Response(200, json={"pid-err": {
+            "status": {"completed": False, "status_str": "error", "messages": [
+                ["execution_error", {
+                    "node_type": "ControlNetLoader",
+                    "exception_message": "controlnet weight shape mismatch",
+                }]]},
+            "outputs": {}}})
+
+    c = make_client(handler)
+    c._timeout = 5  # 若实现错误会空转 5s 后误报 COMFY_TIMEOUT
+    with pytest.raises(ComfyError) as ei:
+        await c.wait_for_result("pid-err", poll_s=0.01)
+    assert ei.value.code == "COMFY_ERROR"
+    assert "ControlNetLoader" in str(ei.value)
+    assert "controlnet weight shape mismatch" in str(ei.value)
+
+
+async def test_execution_error_in_status_str_fails_fast():
+    def handler(request):
+        return httpx.Response(200, json={"pid-err2": {
+            "status": {"completed": False, "status_str": "execution error"},
+            "outputs": {}}})
+
+    c = make_client(handler)
+    c._timeout = 5
+    with pytest.raises(ComfyError) as ei:
+        await c.wait_for_result("pid-err2", poll_s=0.01)
+    assert ei.value.code == "COMFY_ERROR"
+
+
+async def test_completed_without_images_raises_comfy_error_not_timeout():
+    """completed 即终态：无图不应空转到超时误报 COMFY_TIMEOUT。"""
+    def handler(request):
+        return httpx.Response(200, json={"pid-empty": {
+            "status": {"completed": True, "status_str": "executed"},
+            "outputs": {"13": {}}}})
+
+    c = make_client(handler)
+    c._timeout = 5
+    with pytest.raises(ComfyError) as ei:
+        await c.wait_for_result("pid-empty", poll_s=0.01)
+    assert ei.value.code == "COMFY_ERROR"
+    assert "completed without image outputs" in str(ei.value)
