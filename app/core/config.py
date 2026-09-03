@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
     llm_api_key: str | None = None
     comfy_url: str = "http://localhost:8188"
+    oda_exe: str = "ODAFileConverter"
     workspace_dir: str = "experiments"
     registry_db_url: str = "sqlite+aiosqlite:///./registry.db"
     gemini_api_key: str | None = None
