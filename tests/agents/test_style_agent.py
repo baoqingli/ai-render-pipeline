@@ -1,5 +1,7 @@
 # tests/agents/test_style_agent.py
 from app.agents.style import run_style_agent, sanitize_params
+from app.agents.style.graph import RawStyleParams, build_style_graph
+from app.infra.llm import make_chat_model
 from app.models.rendering import StyleParams
 
 
@@ -62,3 +64,13 @@ def test_sanitize_params_direct():
         "wall=None -> white",
         "light=3 -> warm",
     ]
+
+
+def test_build_style_graph_accepts_real_chat_model():
+    """回归（Task 12 CLI 冒烟发现）：裸 dict schema 会让真实 ChatOpenAI 在
+    with_structured_output 构建期抛 ValueError（convert_to_openai_function 不收内建
+    dict 类型）。此处不发任何请求，只验证 extractor 可离线构建，且 schema 字段
+    与 StyleParams 口径一致（枚举校验仍归 sanitize_params）。"""
+    graph = build_style_graph(make_chat_model())
+    assert graph is not None
+    assert set(RawStyleParams.__annotations__) == set(StyleParams.model_fields)

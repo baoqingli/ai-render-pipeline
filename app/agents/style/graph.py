@@ -25,6 +25,18 @@ class _State(TypedDict):
     fallbacks: list[str]
 
 
+class RawStyleParams(TypedDict, total=False):
+    """LLM 抽取的原始参数 schema：全字段可选（用户没提到就省略），枚举校验归
+    sanitize_params。不能用裸 dict——convert_to_openai_function 不收内建 dict 类型，
+    真实 ChatOpenAI 在 with_structured_output 构建期即抛 ValueError（Task 12 实测）。
+    字段口径须与 StyleParams 一致（由 test_build_style_graph_accepts_real_chat_model 钉住）。"""
+    style: str
+    floor: str
+    wall: str
+    light: str
+    budget: str
+
+
 def sanitize_params(raw: dict) -> tuple[StyleParams, list[str]]:
     fallbacks: list[str] = []
     clean: dict = {}
@@ -40,7 +52,7 @@ def sanitize_params(raw: dict) -> tuple[StyleParams, list[str]]:
 
 
 def build_style_graph(llm: BaseChatModel):
-    extractor = llm.with_structured_output(dict)
+    extractor = llm.with_structured_output(RawStyleParams)
 
     async def extract(state: _State) -> dict:
         try:
