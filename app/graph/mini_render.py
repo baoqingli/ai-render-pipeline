@@ -115,7 +115,8 @@ def build_mini_graph(engines: dict[str, object], registry_models: list[ModelInfo
         ok = sum(1 for r in results if r.ok)
         total_cost = sum(r.cost_usd for r in results)
         lines += ["", f"成功率 {ok}/{len(results)}，API 成本 ${total_cost:.2f}"]
-        path = report_dir / f"report_{int(time.time())}.md"
+        # 毫秒粒度文件名避免同秒两次运行相互覆盖；results.json 固定名 latest-wins 属有意设计
+        path = report_dir / f"report_{int(time.time() * 1000)}.md"
         path.write_text("\n".join(lines), encoding="utf-8")
         (report_dir / "results.json").write_text(
             json.dumps([r.model_dump() for r in results], ensure_ascii=False, indent=2),
