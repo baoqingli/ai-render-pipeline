@@ -30,3 +30,14 @@ class RenderTask(BaseModel):
     control_maps: dict[str, str]   # {"depth": 路径/名称, "lineart": ...}
     seed: int
     params_hash: str
+
+
+class RenderResult(BaseModel):
+    view_id: str
+    variant_id: str
+    model_id: str
+    ok: bool
+    image_path: str | None = None
+    error_code: str | None = None
+    latency_ms: int = 0
+    cost_usd: float = 0.0
