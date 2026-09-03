@@ -222,10 +222,10 @@ from app.tools.cache import TOOL_VERSIONS, build_cache_key
 
 def test_cache_key_changes_with_tool_version():
     old = TOOL_VERSIONS["comfy_render"]
+    before = build_cache_key("comfy_render", "a")
     TOOL_VERSIONS["comfy_render"] = "9"
     try:
-        assert build_cache_key("comfy_render", "a") != build_cache_key.__wrapped__("comfy_render", "a") \
-            if hasattr(build_cache_key, "__wrapped__") else True
+        assert build_cache_key("comfy_render", "a") != before
     finally:
         TOOL_VERSIONS["comfy_render"] = old
 
@@ -412,6 +412,7 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 
 from app.agents.style import run_style_agent, sanitize_params
+from app.models.rendering import StyleParams
 
 
 class FakeStructuredModel:
@@ -443,10 +444,9 @@ def test_unknown_enum_falls_back_with_log():
 def test_llm_failure_returns_defaults():
     fake = FakeStructuredModel(RuntimeError("vllm down"))
     out = run_style_agent("x", llm=fake)  # type: ignore[arg-type]
-    assert out.params == StyleParams默认 and "llm_error" in out.fallbacks[0]
+    assert out.params.stable_hash() == StyleParams().stable_hash()
+    assert out.fallbacks and out.fallbacks[0].startswith("llm_error")
 ```
-
-（最后一行断言以 `StyleParams()` 全默认为准：`assert out.params.stable_hash() == StyleParams().stable_hash()`）
 
 - [ ] **Step 2: 运行确认失败** → FAIL
 
@@ -1131,13 +1131,11 @@ class ComfyEngine:
             return RenderResult(view_id=task.view_id, variant_id=task.variant_id,
                                 model_id=task.model_id, ok=False, error_code=e.code,
                                 latency_ms=int((time.monotonic() - start) * 1000))
-        except Exception as e:  # 引擎内一切异常都转成结果，不阻塞扇出
+        except Exception:  # 引擎内一切异常都转成结果，不阻塞扇出
             return RenderResult(view_id=task.view_id, variant_id=task.variant_id,
                                 model_id=task.model_id, ok=False, error_code="COMFY_ERROR",
                                 latency_ms=int((time.monotonic() - start) * 1000))
 ```
-
-（最后一处 except 的 `e` 未用，ruff 会提醒——把 `except Exception as e:` 里补 `del e` 或改用 `except Exception:`，取后者。）
 
 - [ ] **Step 4: 运行通过 → Commit**
 
