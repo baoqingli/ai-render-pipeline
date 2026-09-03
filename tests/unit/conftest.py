@@ -20,3 +20,16 @@ def _local_upload_stub():
         yield
     finally:
         stub.unlink(missing_ok=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _direct_api_output_cleanup():
+    """Remove the DirectAPIEngine output written to the CWD.
+
+    `tests/unit/test_direct_api.py` (kept verbatim from the task brief) uses a
+    RenderTask with `control_maps={}`, so the engine falls back to an out dir
+    of "." and writes v1_var0_nano-banana-2_1.png into the repo root. Removed
+    afterwards to keep the working tree pristine.
+    """
+    yield
+    Path("v1_var0_nano-banana-2_1.png").unlink(missing_ok=True)
