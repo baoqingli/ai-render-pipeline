@@ -1,10 +1,11 @@
 # app/engines/registry.py
+from typing import Any, Literal
+
+from pydantic import BaseModel
 from sqlalchemy import Column, Float, Integer, MetaData, String, Table, select
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from typing_extensions import Literal
 
 from app.models.tooling import Metrics  # noqa: F401  (保持依赖方向)
-from pydantic import BaseModel
 
 SEED = [
     dict(model_id="sdxl-control-v1", engine="comfy", workflow_template="sdxl-control-v1.json",
@@ -59,11 +60,16 @@ class ModelRegistry:
     async def list_enabled(self) -> list[ModelInfo]:
         async with self._engine.connect() as conn:
             rows = (await conn.execute(select(_TABLE).where(_TABLE.c.enabled == 1))).mappings().all()
-        return [ModelInfo(**{k: (bool(v) if k == "enabled" else v) for k, v in r.items()})
-                for r in rows]
+        models: list[ModelInfo] = []
+        for r in rows:
+            data: dict[str, Any] = {k: (bool(v) if k == "enabled" else v) for k, v in r.items()}
+            models.append(ModelInfo(**data))
+        return models
 
     async def get(self, model_id: str) -> ModelInfo | None:
         async with self._engine.connect() as conn:
             row = (await conn.execute(select(_TABLE).where(_TABLE.c.model_id == model_id))).mappings().first()
-        return None if row is None else ModelInfo(
-            **{k: (bool(v) if k == "enabled" else v) for k, v in row.items()})
+        if row is None:
+            return None
+        data: dict[str, Any] = {k: (bool(v) if k == "enabled" else v) for k, v in row.items()}
+        return ModelInfo(**data)
