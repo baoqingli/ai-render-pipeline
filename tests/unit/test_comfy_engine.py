@@ -44,3 +44,28 @@ async def test_failure_returns_not_ok_not_raise(tmp_path):
     # Adapted from the brief (result.error -> result.error_code): RenderResult
     # carries the failure as error_code, per the model definition.
     assert not result.ok and result.error_code is not None
+
+
+async def test_default_weights_are_sdxl_family(tmp_path):
+    """终审 minor：默认 checkpoint 与 ControlNet 必须同家族（SDXL）。"""
+    fake = FakeClient()
+    engine = ComfyEngine(client=fake, template_dir=Path("workflows"), out_dir=tmp_path)
+    await engine.submit(TASK, INFO)
+    assert fake.wf["1"]["inputs"]["ckpt_name"] == "sd_xl_base_1.0.safetensors"
+    assert fake.wf["4"]["inputs"]["control_net_name"] == \
+        "xinsir/controlnet-depth-sdxl-1.0.safetensors"
+    assert fake.wf["5"]["inputs"]["control_net_name"] == \
+        "xinsir/controlnet-lineart-sdxl-1.0.safetensors"
+
+
+async def test_custom_weight_names_flow_into_workflow(tmp_path):
+    """CLI 覆盖路径：自定义 checkpoint/ControlNet 名必须注入 workflow。"""
+    fake = FakeClient()
+    engine = ComfyEngine(client=fake, template_dir=Path("workflows"), out_dir=tmp_path,
+                         checkpoint="my-ckpt.safetensors",
+                         controlnet_depth="my-depth.safetensors",
+                         controlnet_lineart="my-lineart.safetensors")
+    await engine.submit(TASK, INFO)
+    assert fake.wf["1"]["inputs"]["ckpt_name"] == "my-ckpt.safetensors"
+    assert fake.wf["4"]["inputs"]["control_net_name"] == "my-depth.safetensors"
+    assert fake.wf["5"]["inputs"]["control_net_name"] == "my-lineart.safetensors"

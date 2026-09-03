@@ -77,6 +77,18 @@ async def main() -> None:
     ap.add_argument("--control-dir", default="fixtures/control_maps")
     ap.add_argument("--description", required=True)
     ap.add_argument("--models", default=None, help="逗号分隔 model_id 过滤")
+    ap.add_argument(
+        "--checkpoint", default="sd_xl_base_1.0.safetensors",
+        help="ComfyUI checkpoint 文件名（默认 SDXL 家族组合；实际以操作者"
+             "下载到 deploy/comfy-models/checkpoints 的文件名为准，按需覆盖）")
+    ap.add_argument(
+        "--controlnet-depth", default="xinsir/controlnet-depth-sdxl-1.0.safetensors",
+        help="depth ControlNet 文件名（须与 checkpoint 同家族，SDXL 默认；"
+             "以操作者下载到 controlnet/ 的文件名为准）")
+    ap.add_argument(
+        "--controlnet-lineart", default="xinsir/controlnet-lineart-sdxl-1.0.safetensors",
+        help="lineart ControlNet 文件名（须与 checkpoint 同家族，SDXL 默认；"
+             "以操作者下载到 controlnet/ 的文件名为准）")
     ap.add_argument("--variants", type=int, default=2)
     ap.add_argument("--report-dir", default="experiments/phase1")
     args = ap.parse_args()
@@ -94,7 +106,10 @@ async def main() -> None:
     if any(m.engine == "comfy" for m in models):
         engines["comfy"] = ComfyEngine(
             client=ComfyClient(s.comfy_url),
-            template_dir=Path("workflows"), out_dir=Path("experiments/renders"))
+            template_dir=Path("workflows"), out_dir=Path("experiments/renders"),
+            checkpoint=args.checkpoint,
+            controlnet_depth=args.controlnet_depth,
+            controlnet_lineart=args.controlnet_lineart)
     # truthiness 判断：空串视为未配置（与 Settings 的 str | None 兼容），跳过该适配器
     api_adapters: dict[str, ApiAdapter] = {}
     if s.gemini_api_key:

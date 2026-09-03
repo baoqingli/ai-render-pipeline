@@ -10,10 +10,12 @@ from app.models.rendering import RenderResult, RenderTask
 
 
 class ComfyEngine:
+    # SDXL 家族默认组合（终审 minor：原 SD1.5 ControlNet 与 SDXL checkpoint
+    # 不匹配）。实际文件名以操作者下载为准，可用 CLI flag 覆盖。
     def __init__(self, client: ComfyClient, template_dir: Path, out_dir: Path,
                  checkpoint: str = "sd_xl_base_1.0.safetensors",
-                 controlnet_depth: str = "control_v11f1p_sd15_depth.pth",
-                 controlnet_lineart: str = "control_v11p_sd15_lineart.pth") -> None:
+                 controlnet_depth: str = "xinsir/controlnet-depth-sdxl-1.0.safetensors",
+                 controlnet_lineart: str = "xinsir/controlnet-lineart-sdxl-1.0.safetensors") -> None:
         self.client = client
         self.template_dir = template_dir
         self.out_dir = out_dir
