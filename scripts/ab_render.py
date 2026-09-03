@@ -28,7 +28,7 @@ from app.engines.direct_api import (
     GeminiAdapter,
     OpenAIImageAdapter,
 )
-from app.engines.registry import ModelRegistry
+from app.engines.registry import ModelInfo, ModelRegistry
 from app.graph.mini_render import build_mini_graph, discover_views
 from app.infra.pools import TokenBucket
 
@@ -54,6 +54,24 @@ def ensure_views(control_dir: Path | str) -> list[dict]:
     return views
 
 
+def ensure_models(models: list[ModelInfo],
+                  requested: set[str] | None) -> list[ModelInfo]:
+    """--models 过滤 + 零匹配守卫（终审 Important #3）：请求 ID 一个都没命中
+    （典型为拼写错误）时打印请求 ID 与可用 enabled ID 并以非零码退出，
+    对称于 ensure_views；在任何 engine 构造之前调用。未传过滤时仅要求
+    registry 至少有一个 enabled 模型。
+    """
+    available = sorted(m.model_id for m in models)
+    if requested is not None:
+        models = [m for m in models if m.model_id in requested]
+    if not models:
+        what = f"requested {sorted(requested)}, " if requested else ""
+        print(f"--models matched no enabled model: {what}available: {available}",
+              file=sys.stderr)
+        raise SystemExit(2)
+    return models
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--control-dir", default="fixtures/control_maps")
@@ -70,8 +88,7 @@ async def main() -> None:
     await reg.setup()
     models = await reg.list_enabled()
     flt = parse_models_filter(args.models)
-    if flt:
-        models = [m for m in models if m.model_id in flt]
+    models = ensure_models(models, flt)  # 零匹配快速失败：在 engine 构造之前
 
     engines: dict[str, object] = {}
     if any(m.engine == "comfy" for m in models):
