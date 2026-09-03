@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+.env
+*.pyc
+experiments/
+fixtures/control_maps/*
+!fixtures/control_maps/.gitkeep
+registry.db
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
