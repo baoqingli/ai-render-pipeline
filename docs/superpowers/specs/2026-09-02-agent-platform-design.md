@@ -57,7 +57,7 @@
 | D1 | **LangGraph 统一编排，不引入 Celery**。重工具（Blender/ComfyUI/API）为异步节点，内部提交专用进程池排队；工具靠缓存键幂等，重放安全 | 备选 LangGraph 大脑 + Celery 手脚：调度能力强但两套状态系统一致性复杂、调试链路长。当前规模一套状态系统更优；任务量上来后再演进 |
 | D2 | **固定 DAG 主图 + agent 节点**。主干确定性（同输入同路径、可重放、可精确测试），agent 只在低置信诊断、布局补全、QA 灰区三处介入 | 备选 supervisor 动态路由多 agent：最灵活但控制流不确定、难回归测试、LLM 成本高，与"全自动可重放"的定位冲突 |
 | D3 | **完整系统开发文档**（本文档），writing-plans 按 Phase 切实施计划 | 备选只写框架层或只写 Phase 2：会在开发中频繁回跳 V2 文档或后期补文档 |
-| D4 | LLM 运行时：**自部署 Qwen（vLLM，OpenAI 兼容端点）**，LangChain `ChatOpenAI(base_url=...)` 接入；四个 agent 共用，可按 agent 独立换模型 | 沿用 V2 开源优先决策；闭源 API 作为配置备选 |
+| D4 | LLM 运行时（Phase 1 起）：**智谱 GLM API（OpenAI 兼容端点 `https://open.bigmodel.cn/api/paas/v4`，模型 `glm-5.3`）**，LangChain `ChatOpenAI(base_url=..., api_key=Settings.llm_api_key)` 接入；四个 agent 共用，可按 agent 独立换模型。**自部署 Qwen（vLLM）降级为切换项**（成本敏感或数据不出内网需求出现时切换，接口不变） | GPU 只需服务 ComfyUI 渲染，免去 vLLM 显存与运维；密钥只进 `.env`（gitignored），仓库内仅占位符 |
 | D5 | 观测选型：**Langfuse（自部署）+ OpenTelemetry/Jaeger** | LangSmith 为商业 SaaS，与开源优先不符 |
 | D6 | 反馈闭环 = **新 iteration（新 thread）**，上游阶段靠缓存键瞬时命中 | 备选在同 thread 里回跳：状态复杂、缓存复用不直观 |
 
@@ -86,7 +86,7 @@
         └───────────────┴───────┬───────────┴─────────────────┘
                                 ▼
               PostgreSQL(元数据+检查点) + MinIO(全部产物)
-              vLLM 自部署 Qwen(OpenAI 兼容) → 4 个 agent 共用
+              LLM: GLM API(OpenAI 兼容, Phase 1) / vLLM Qwen(切换项) → 4 个 agent 共用
               Langfuse(LLM 轨迹) + Jaeger(工具 span)
 ```
 

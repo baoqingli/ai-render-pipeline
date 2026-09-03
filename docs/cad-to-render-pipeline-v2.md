@@ -545,8 +545,9 @@ ControlNet 均有商业先例），没有需要发明尚不存在技术的地方
 
 ### AI
 
-- 风格参数提取 LLM：**首选自部署开源模型**（Qwen，Apache 2.0 / DeepSeek），
-  该任务为简单结构化提取，7B 级即可胜任；闭源 API（GPT / Claude / GLM）作为备选
+- 风格参数提取 LLM：**Phase 1 起用智谱 GLM API**（OpenAI 兼容端点，免自建 vLLM，
+  GPU 专供 ComfyUI）；自部署开源模型（Qwen / DeepSeek，vLLM）为切换项，
+  接口不变（OpenAI 兼容 base_url 可配置）
 - ComfyUI（GPLv3）
 - SDXL（Open RAIL++-M，允许商用）
 - FLUX（dev 版权重许可限制商用，采用前核对当前条款）
