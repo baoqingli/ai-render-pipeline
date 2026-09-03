@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     llm_base_url: str = "http://localhost:8001/v1"
     llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    llm_api_key: str | None = None
     comfy_url: str = "http://localhost:8188"
     workspace_dir: str = "experiments"
     registry_db_url: str = "sqlite+aiosqlite:///./registry.db"
