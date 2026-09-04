@@ -1,6 +1,8 @@
 # tests/unit/test_blender_views.py
+from shapely.geometry import Polygon as ShapelyPolygon
+
 from app.models.scene import Room, SceneJSON, Wall
-from app.tools.blender.geom import plan_views
+from app.tools.blender.geom import SHRINK, plan_views
 
 
 def _two_room_scene():
@@ -42,3 +44,22 @@ def test_plan_views_global_fallback_when_room_too_small():
                                            [700.0, 700.0], [0.0, 700.0]])])
     poses = plan_views(scene)
     assert len(poses) == 1 and poses[0].view_id == "view_01"
+
+
+def test_plan_views_concave_room_multipolygon_no_crash():
+    """哑铃形房间（走廊 400mm < 2×SHRINK）收缩后为 MultiPolygon——取最大片不崩。"""
+    neck_room = [[0.0, 0.0], [2000.0, 0.0],          # 左块下缘
+                 [2000.0, 1000.0], [2800.0, 1000.0],  # 走廊下沿（走廊高 400）
+                 [2800.0, 0.0], [4800.0, 0.0],        # 右块下缘
+                 [4800.0, 2400.0], [2800.0, 2400.0],  # 右块上缘
+                 [2800.0, 1400.0], [2000.0, 1400.0],  # 走廊上沿
+                 [2000.0, 2400.0], [0.0, 2400.0]]     # 左块上缘
+    # 预置断言确保夹颈 < 800 必然分裂——坐标改动时此处先行失败，
+    # 防止退化成普通多边形测试而失去覆盖意义。
+    eroded = ShapelyPolygon(neck_room).buffer(-SHRINK)
+    assert eroded.geom_type == "MultiPolygon"
+    scene = SceneJSON(rooms=[Room(id="r1", name="哑铃", polygon=neck_room)])
+    poses = plan_views(scene)
+    assert len(poses) >= 1
+    for p in poses:
+        assert p.position[2] == 1500.0 and p.target[2] == 1200.0

@@ -162,6 +162,8 @@ def plan_views(scene: SceneJSON, per_room: int = 2) -> list[CameraPose]:
         poly = Polygon(room.polygon).buffer(-SHRINK)
         if poly.is_empty:
             continue
+        if poly.geom_type == "MultiPolygon":          # 凹形房收缩成多片——取最大片
+            poly = max(poly.geoms, key=lambda g: g.area)
         minx, miny, maxx, maxy = poly.bounds
         cx, cy = poly.centroid.x, poly.centroid.y
         long_x = (maxx - minx) >= (maxy - miny)
