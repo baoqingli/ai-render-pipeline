@@ -22,7 +22,7 @@
 
 1. **`scene.node_tree` 不存在**（5.x 移除，deprecation 预告 6.0 删 `use_nodes`）。
    内省得真 API：合成器为节点组形态——`scene.compositing_node_group` +
-   `bpy.data.node_groups.new(type="CompositorNodeTree")`。新增 `_comp_tree()` 双版本兼容助手。
+   `bpy.data.node_groups.new(type="CompositorNodeTree")`。新增 `_comp_tree()`（Blender 4.5+/5.x 节点组形态取树）。
 2. **FileOutput 节点仅支持 OPEN_EXR_MULTILAYER**（5.x 新合成器限制，PNG 枚举不存在）。
    改道：**Mist → Group Output 直出**——组输出即渲染结果，`write_still=True` 直接落 PNG
    （`.png` 结尾的 filepath 不加帧号，实测精确命名）。原 `_settle_depth_output` 归位函数
@@ -42,5 +42,5 @@
 
 ## 验收判定
 
-✅ 切片 2 完成条件全部满足：离线 98 测试全绿（含切片新增 30）；合成户型三 pass 产出并被
+✅ 切片 2 完成条件全部满足：离线 99 测试全绿（含切片新增 31，MultiPolygon 守卫测试计入）；合成户型三 pass 产出并被
 ab_render 消费出图；真图降级路径有产出。Freestyle 疑点记为薄壳层后续校准项，不阻塞。
