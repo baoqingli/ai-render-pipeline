@@ -22,3 +22,23 @@ def test_make_chat_model_defaults_to_local_without_key():
     assert s.llm_api_key is None
     llm = make_chat_model(s)
     assert llm.openai_api_key.get_secret_value() == "local"
+
+
+def test_make_chat_model_uses_anthropic_protocol_for_glm_package_endpoint():
+    """GLM 套餐协议端点（/api/anthropic）：分支到 ChatAnthropic 并透传配置。"""
+    from langchain_anthropic import ChatAnthropic
+
+    s = Settings(_env_file=None, llm_base_url="https://open.bigmodel.cn/api/anthropic",
+                 llm_api_key="k", llm_model="glm-5.3")
+    llm = make_chat_model(s)
+    assert isinstance(llm, ChatAnthropic)
+    assert llm.model == "glm-5.3"
+    assert llm.anthropic_api_url == "https://open.bigmodel.cn/api/anthropic"
+    assert llm.anthropic_api_key.get_secret_value() == "k"
+
+
+def test_make_chat_model_anthropic_branch_without_key_uses_placeholder():
+    """Anthropic 分支未配 key：显式占位 "not-set"，不回落读环境变量。"""
+    s = Settings(_env_file=None, llm_base_url="https://open.bigmodel.cn/api/anthropic")
+    llm = make_chat_model(s)
+    assert llm.anthropic_api_key.get_secret_value() == "not-set"
