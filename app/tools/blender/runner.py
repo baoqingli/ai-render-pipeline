@@ -52,11 +52,19 @@ async def build_white_model(scene_json_path: str | Path, out_dir: str | Path,
         return ToolResult(ok=False, error=ToolError(
             code="BLENDER_TIMEOUT", message=f"blender timed out (> {TIMEOUT_S}s)",
             retryable=True))
-    if proc.returncode != 0 or not all((out / n).exists() for n in expected):
+    missing = [n for n in expected if not (out / n).exists()]
+    if proc.returncode != 0 or missing:
         stdout = getattr(proc, "stdout", None)
-        detail = stdout[-200:] if isinstance(stdout, (bytes, str)) else ""
+        stderr = getattr(proc, "stderr", None)
+
+        def _tail(x: object) -> bytes:
+            if isinstance(x, str):
+                return x[-150:].encode("utf-8", "replace")
+            return x[-150:] if isinstance(x, bytes) else b""
+
+        detail = _tail(stdout) + b" | stderr: " + _tail(stderr)
         return ToolResult(ok=False, error=ToolError(
             code="BLENDER_CRASH",
-            message=f"blender rc={proc.returncode}; missing artifacts; {detail!r}",
+            message=f"blender rc={proc.returncode}; artifacts_missing={missing}; {detail!r}",
             retryable=True))
     return ToolResult(ok=True, data=out, cache_key=key, metrics=Metrics())
