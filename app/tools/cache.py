@@ -7,6 +7,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "comfy_render": "1",
     "api_render": "1",
     "convert_dwg": "1",
+    "inspect_dxf": "1",
 }
 
 
