@@ -7,6 +7,22 @@ from app.models.pipeline import PipelineStage
 from app.models.rendering import RenderResult, RenderTask, StyleParams
 from app.models.scene import SceneJSON
 
+_STAGE_RANK = {s: i for i, s in enumerate(PipelineStage)}
+
+
+def keep_furthest_stage(cur: PipelineStage, new: PipelineStage) -> PipelineStage:
+    """stage 通道合并律（Task 4 并行分支引入）：convert ∥ style 同超步各写 stage，
+    LastValue 通道会抛 InvalidUpdateError，故改为聚合通道。合并规则（交换律）：
+    - finalized 透传：finalize 是唯一终态写者（含失败收口），必须落地；
+    - 失败粘性：任一分支 failed 即 failed（失败短路不成功分支被覆盖）；
+    - 其余取最远进度：枚举定义顺序即管线进度序（created→…→finalized）。
+    """
+    if new == PipelineStage.finalized:
+        return PipelineStage.finalized
+    if PipelineStage.failed in (cur, new):
+        return PipelineStage.failed
+    return max(cur, new, key=_STAGE_RANK.__getitem__)
+
 
 class PipelineState(TypedDict):
     # ── 输入 ──
@@ -38,7 +54,8 @@ class PipelineState(TypedDict):
     confidence: dict[str, float]
     fallback_log: Annotated[list, operator.add]
     errors: Annotated[list, operator.add]
-    stage: PipelineStage
+    # 并行分支多写 stage：聚合通道（合并律见 keep_furthest_stage）
+    stage: Annotated[PipelineStage, keep_furthest_stage]
 
 
 def initial_state(project_id: str, iteration: int, cad_file_key: str,

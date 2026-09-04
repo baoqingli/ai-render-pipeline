@@ -1,5 +1,6 @@
 # tests/graph/test_cad_nodes.py
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.graph.nodes.cad_branch import (
     convert_node,
@@ -18,6 +19,12 @@ from app.models.tooling import ToolError, ToolResult
 
 def _state(cad="uploads/a.dxf", **kw):
     return initial_state("p1", 1, cad, "描述") | kw
+
+
+def _deps(**tools):
+    """Task 4 注入口径：inspect/parse 工具经 keyword-only deps 注入节点，
+    单测用 SimpleNamespace 鸭子类型（tests 不进 mypy 门禁）。"""
+    return SimpleNamespace(**tools)
 
 
 async def test_ingest_accepts_dxf_and_rejects_other(tmp_path):
@@ -61,23 +68,22 @@ async def test_convert_failure_fails_soft(tmp_path, monkeypatch):
     assert is_failed(_state() | out) and out["errors"][0].code == "ODA_MISSING"
 
 
-async def test_inspect_and_diagnose_stub(tmp_path, monkeypatch):
+async def test_inspect_and_diagnose_stub(tmp_path):
     fake = CadReport(confidence=0.5, proxy_entity_count=3)
-    monkeypatch.setattr("app.graph.nodes.cad_branch.inspect_dxf", lambda p: fake)
-    out = await inspect_node(_state() | {"dxf_key": "x.dxf"})
+    out = await inspect_node(_state() | {"dxf_key": "x.dxf"},
+                             deps=_deps(inspect_dxf=lambda p: fake))
     assert out["confidence"]["parse"] == 0.5
     diag = await diagnose_node(_state() | {"cad_report": fake, "confidence": {"parse": 0.5}})
     assert diag["fallback_log"][0].stage == "diagnose"
     assert diag["parse_strategy"] is None                 # 规则桩：策略 None
 
 
-async def test_inspect_exception_degrades(tmp_path, monkeypatch):
+async def test_inspect_exception_degrades(tmp_path):
     # 新增（brief 外）：勘察异常 → 记 errors + 置信 0，但不 fail（降级继续）
     def boom(p):
         raise RuntimeError("ezdxf blew up")
 
-    monkeypatch.setattr("app.graph.nodes.cad_branch.inspect_dxf", boom)
-    out = await inspect_node(_state() | {"dxf_key": "x.dxf"})
+    out = await inspect_node(_state() | {"dxf_key": "x.dxf"}, deps=_deps(inspect_dxf=boom))
     assert out["errors"][0].code == "INSPECT_FAILED"
     assert out["confidence"]["parse"] == 0.0 and out["stage"].value == "inspected"
     assert not is_failed(_state() | out)
@@ -90,28 +96,28 @@ async def test_diagnose_clean_report_no_fallback(tmp_path):
     assert not diag["fallback_log"] and diag["parse_strategy"] is None
 
 
-async def test_parse_node_uses_tool_result(tmp_path, monkeypatch):
+async def test_parse_node_uses_tool_result(tmp_path):
     scene = SceneJSON()
     tr = ToolResult(ok=True, data=scene, cache_key="k123", error=None)
-    monkeypatch.setattr("app.graph.nodes.cad_branch.parse_scene", lambda p, r=None: tr)
-    out = await parse_node(_state() | {"dxf_key": "x.dxf"})
+    out = await parse_node(_state() | {"dxf_key": "x.dxf"},
+                           deps=_deps(parse_scene=lambda p, r=None: tr))
     assert out["scene_cache_key"] == "k123" and out["scene_json"] == scene
 
 
-async def test_parse_failure_fails(tmp_path, monkeypatch):
+async def test_parse_failure_fails(tmp_path):
     # 新增（brief 外）：parse 失败 → fail（errors + stage=failed）
     tr = ToolResult(ok=False, error=ToolError(code="PARSE_FAILED", message="no walls"))
-    monkeypatch.setattr("app.graph.nodes.cad_branch.parse_scene", lambda p, r=None: tr)
-    out = await parse_node(_state() | {"dxf_key": "x.dxf"})
+    out = await parse_node(_state() | {"dxf_key": "x.dxf"},
+                           deps=_deps(parse_scene=lambda p, r=None: tr))
     assert is_failed(_state() | out) and out["errors"][0].code == "PARSE_FAILED"
 
 
-async def test_parse_low_confidence_logs_fallback(tmp_path, monkeypatch):
+async def test_parse_low_confidence_logs_fallback(tmp_path):
     # 新增（brief 外）：ok=True 但带 PARSE_LOW_CONFIDENCE 提示 → fallback_log
     tr = ToolResult(ok=True, data=SceneJSON(), cache_key="k9", error=ToolError(
         code="PARSE_LOW_CONFIDENCE", message="floor_height -> 2800 默认"))
-    monkeypatch.setattr("app.graph.nodes.cad_branch.parse_scene", lambda p, r=None: tr)
-    out = await parse_node(_state() | {"dxf_key": "x.dxf"})
+    out = await parse_node(_state() | {"dxf_key": "x.dxf"},
+                           deps=_deps(parse_scene=lambda p, r=None: tr))
     assert out["fallback_log"][0].stage == "parse"
     assert "floor_height" in out["fallback_log"][0].detail
 
@@ -119,10 +125,14 @@ async def test_parse_low_confidence_logs_fallback(tmp_path, monkeypatch):
 async def test_missing_dxf_key_degrades_or_fails(tmp_path):
     # 新增（brief 外）：dxf_key 缺失（图误接线，mypy 收窄分支）——
     # inspect 按降级不 fail；parse 按 fail 处理
-    out = await inspect_node(_state())
+    def _no_tool(*a, **k):
+        raise AssertionError("dxf_key 缺失时不应触达工具")
+
+    guard = _deps(inspect_dxf=_no_tool, parse_scene=_no_tool)
+    out = await inspect_node(_state(), deps=guard)
     assert out["errors"][0].code == "DXF_MISSING"
     assert out["stage"].value == "inspected" and not is_failed(_state() | out)
-    out2 = await parse_node(_state())
+    out2 = await parse_node(_state(), deps=guard)
     assert is_failed(_state() | out2) and out2["errors"][0].code == "DXF_MISSING"
 
 

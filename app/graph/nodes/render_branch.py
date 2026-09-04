@@ -3,19 +3,24 @@ import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langgraph.types import Send
 
-# 工具/agent 以 from-import 落名于本模块：测试 monkeypatch 的是
-# app.graph.nodes.render_branch.{build_white_model, run_style_agent}（同 cad_branch 惯例）
 from app.agents.style import run_style_agent
 from app.engines.prompt import assemble_prompt
 from app.engines.registry import ModelInfo
 from app.graph.state import PipelineState
 from app.models.pipeline import FallbackEvent, NodeError, PipelineStage, QaAction
 from app.models.rendering import RenderResult, RenderTask
-from app.tools.blender.runner import build_white_model
+
+if TYPE_CHECKING:  # 仅类型：运行时反向导入会与 pipeline.py 成环
+    from app.graph.pipeline import GraphDeps
+
+# 注入口径（Task 4）：build_white_model 经 keyword-only deps 注入（GraphDeps 持有，
+# 图测试换 fakes；测试侧可用 SimpleNamespace 鸭子类型——tests 不进 mypy 门禁）；
+# run_style_agent 仍为模块级 from-import——测试 monkeypatch 的是
+# app.graph.nodes.render_branch.run_style_agent（同 cad_branch 惯例）
 
 PASSES = ("depth", "lineart", "white")
 
@@ -25,7 +30,8 @@ def _fail(node: str, code: str, message: str) -> dict:
             "stage": PipelineStage.failed}
 
 
-async def white_model_node(state: PipelineState, *, data_dir: Path) -> dict:
+async def white_model_node(state: PipelineState, *, data_dir: Path,
+                           deps: "GraphDeps") -> dict:
     """scene 落盘（内容寻址）→ build_white_model → glob 控制图。"""
     scene = state.get("scene_json")
     if scene is None:
@@ -37,7 +43,7 @@ async def white_model_node(state: PipelineState, *, data_dir: Path) -> dict:
     scene_path = proj_dir / f"{sha8}.json"        # 同 scene 同名复用（增量重生成）
     scene_path.write_text(scene_text, encoding="utf-8")
     out_dir = Path(data_dir) / "model" / state["project_id"]  # 内容寻址缓存复用
-    result = await build_white_model(scene_path, out_dir)
+    result = await deps.build_white_model(scene_path, out_dir)
     if not result.ok or result.data is None:
         return _fail("white_model",
                      result.error.code if result.error else "WHITE_MODEL_FAILED",

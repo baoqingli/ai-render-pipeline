@@ -1,6 +1,7 @@
 # tests/graph/test_render_nodes.py
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from langgraph.types import Send
 
@@ -29,6 +30,12 @@ def _state(**kw):
     return initial_state("p1", 1, "a.dxf", "暖原木") | kw
 
 
+def _deps(**tools):
+    """Task 4 注入口径：build_white_model 经 keyword-only deps 注入节点，
+    单测用 SimpleNamespace 鸭子类型（tests 不进 mypy 门禁）。"""
+    return SimpleNamespace(**tools)
+
+
 def _item(engine="comfy"):
     return {"task": {"view_id": "v", "variant_id": "var0", "model_id": "m",
                      "prompt": {"positive": "p", "negative": ""},
@@ -37,7 +44,7 @@ def _item(engine="comfy"):
             "white": "w.png", "out_dir": "renders"}
 
 
-async def test_white_model_node_caches_maps(tmp_path, monkeypatch):
+async def test_white_model_node_caches_maps(tmp_path):
     out = tmp_path / "model"
     out.mkdir()
     for v in ("view_01", "view_02"):
@@ -48,15 +55,15 @@ async def test_white_model_node_caches_maps(tmp_path, monkeypatch):
     async def fake_build(scene_path, out_dir, blender_exe=None):
         return ToolResult(ok=True, data=Path(out), cache_key="bk")
 
-    monkeypatch.setattr("app.graph.nodes.render_branch.build_white_model", fake_build)
     st = _state(scene_json=SceneJSON())
-    res = await white_model_node(st, data_dir=tmp_path)
+    res = await white_model_node(st, data_dir=tmp_path,
+                                 deps=_deps(build_white_model=fake_build))
     assert set(res["views"]) == {"view_01", "view_02"}
     assert res["control_maps"]["view_01"]["depth"].endswith("view_01_depth.png")
     assert res["blend_cache_key"] == "bk"
 
 
-async def test_white_model_node_writes_content_addressed_scene(tmp_path, monkeypatch):
+async def test_white_model_node_writes_content_addressed_scene(tmp_path):
     # 新增（brief 外）：scene 落盘 {data_dir}/projects/{pid}/{sha8}.json、
     # 白模 out={data_dir}/model/{pid}——内容寻址缓存复用约定（增量重生成依赖）
     calls = {}
@@ -65,8 +72,8 @@ async def test_white_model_node_writes_content_addressed_scene(tmp_path, monkeyp
         calls["scene"], calls["out"] = Path(scene_path), Path(out_dir)
         return ToolResult(ok=True, data=Path(out_dir), cache_key="bk")
 
-    monkeypatch.setattr("app.graph.nodes.render_branch.build_white_model", fake_build)
-    await white_model_node(_state(scene_json=SceneJSON()), data_dir=tmp_path)
+    await white_model_node(_state(scene_json=SceneJSON()), data_dir=tmp_path,
+                           deps=_deps(build_white_model=fake_build))
     assert calls["out"] == tmp_path / "model" / "p1"
     written = list((tmp_path / "projects" / "p1").glob("*.json"))
     assert len(written) == 1 and calls["scene"] == written[0]
@@ -74,18 +81,22 @@ async def test_white_model_node_writes_content_addressed_scene(tmp_path, monkeyp
 
 async def test_white_model_node_missing_scene_fails(tmp_path):
     # 新增（brief 外）：scene_json 缺失 → NO_SCENE fail
-    res = await white_model_node(_state(), data_dir=tmp_path)
+    def _no_tool(*a, **k):
+        raise AssertionError("scene 缺失时不应触达工具")
+
+    res = await white_model_node(_state(), data_dir=tmp_path,
+                                 deps=_deps(build_white_model=_no_tool))
     assert res["errors"][0].code == "NO_SCENE"
     assert res["stage"] is PipelineStage.failed
 
 
-async def test_white_model_node_tool_failure_fails_soft(tmp_path, monkeypatch):
+async def test_white_model_node_tool_failure_fails_soft(tmp_path):
     # 新增（brief 外）：工具 ok=False → 透传工具错误码 + stage=failed
     async def fake_build(scene_path, out_dir, blender_exe=None):
         return ToolResult(ok=False, error=ToolError(code="BLENDER_CRASH", message="rc=1"))
 
-    monkeypatch.setattr("app.graph.nodes.render_branch.build_white_model", fake_build)
-    res = await white_model_node(_state(scene_json=SceneJSON()), data_dir=tmp_path)
+    res = await white_model_node(_state(scene_json=SceneJSON()), data_dir=tmp_path,
+                                 deps=_deps(build_white_model=fake_build))
     assert res["errors"][0].code == "BLENDER_CRASH"
     assert res["stage"] is PipelineStage.failed
 
