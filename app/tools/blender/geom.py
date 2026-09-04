@@ -1,7 +1,8 @@
 """白模纯几何层：归一化、墙体矩形化、开洞分段、机位规划、BuildPlan 组装。全程 mm。"""
 from typing import NamedTuple
 
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
+from shapely.ops import unary_union
 
 from app.models.scene import SceneJSON, Wall
 
@@ -136,3 +137,51 @@ def segment_wall(box: Box, openings: list[Opening]) -> list[Box]:
     if half_l - cursor > 1.0:                                      # 尾部全高段
         segs.append(_local_box(box, (cursor + half_l) / 2.0, half_l - cursor, 0.0, fh))
     return segs
+
+
+class CameraPose(NamedTuple):
+    view_id: str
+    position: tuple[float, float, float]
+    target: tuple[float, float, float]
+
+
+CAM_Z = 1500.0
+TARGET_Z = 1200.0
+SHRINK = 400.0
+
+
+def plan_views(scene: SceneJSON, per_room: int = 2) -> list[CameraPose]:
+    """机位规划：房间内候选（质心 + 长轴 ±25%）取 buffer(-400) 内者，按到边界距离评分取前
+    per_room；无房间或全部候选落外 → 全局降级单机位（墙并集质心；无墙再降级房间并集质心）。
+    """
+    scene = normalize_scene(scene)
+    poses: list[CameraPose] = []
+    n = 0
+    for room in scene.rooms:
+        poly = Polygon(room.polygon).buffer(-SHRINK)
+        if poly.is_empty:
+            continue
+        minx, miny, maxx, maxy = poly.bounds
+        cx, cy = poly.centroid.x, poly.centroid.y
+        long_x = (maxx - minx) >= (maxy - miny)
+        span = (maxx - minx) if long_x else (maxy - miny)
+        cands = [(cx, cy)]
+        for s in (-0.25, 0.25):
+            cands.append((cx + s * span, cy) if long_x else (cx, cy + s * span))
+        inside = [(x, y) for x, y in cands if poly.contains(Point(x, y))]
+        if not inside:
+            continue
+        inside.sort(key=lambda p: -poly.exterior.distance(Point(p[0], p[1])))
+        for x, y in inside[:per_room]:
+            n += 1
+            poses.append(CameraPose(view_id=f"view_{n:02d}",
+                                    position=(x, y, CAM_Z), target=(cx, cy, TARGET_Z)))
+    if not poses:                                    # 全局降级（无房间/全落外）
+        geoms = [Polygon(w.polygon) for w in scene.walls] \
+            or [Polygon(r.polygon) for r in scene.rooms]
+        if not geoms:
+            return []
+        c = unary_union(geoms).centroid
+        return [CameraPose(view_id="view_01",
+                           position=(c.x, c.y, CAM_Z), target=(c.x, c.y, TARGET_Z))]
+    return poses
