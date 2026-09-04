@@ -1,4 +1,5 @@
 # tests/unit/test_convert_dwg.py
+import subprocess
 from pathlib import Path
 
 from app.tools.cad import convert as conv
@@ -37,6 +38,16 @@ async def test_convert_cache_hit_second_call(tmp_path, monkeypatch):
     first = await conv.convert_dwg(dwg, tmp_path / "out")
     second = await conv.convert_dwg(dwg, tmp_path / "out")
     assert first.ok and second.ok and second.cache_hit and len(runs) == 1
+
+
+async def test_oda_timeout_is_retryable(tmp_path, monkeypatch):
+    def hang(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd="x", timeout=300)
+
+    monkeypatch.setattr(conv.subprocess, "run", hang)
+    result = await conv.convert_dwg(_make_dwg(tmp_path / "a.dwg"), tmp_path / "out")
+    assert not result.ok and result.error is not None
+    assert result.error.code == "ODA_TIMEOUT" and result.error.retryable is True
 
 
 async def test_oda_missing_is_not_retryable(tmp_path, monkeypatch):

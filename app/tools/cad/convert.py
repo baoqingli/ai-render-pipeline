@@ -37,6 +37,13 @@ async def convert_dwg(dwg_path: str | Path, out_dir: str | Path) -> ToolResult[P
             proc = subprocess.run(  # noqa: ASYNC221
                 [exe, str(tin), str(out), *ODA_ARGS], capture_output=True, timeout=300
             )
+    except subprocess.TimeoutExpired:  # spec §7 超时+分类重试：超时类可重试（区别于 ODA_MISSING）
+        return ToolResult(
+            ok=False,
+            error=ToolError(
+                code="ODA_TIMEOUT", message="ODA File Converter timed out (>300s)", retryable=True
+            ),
+        )
     except FileNotFoundError:  # exe 不在（POSIX 与 WinError 2 同症）→ ODA_MISSING
         return ToolResult(
             ok=False,
