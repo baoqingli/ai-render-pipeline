@@ -4,6 +4,7 @@ from typing import NamedTuple
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
+from app.models.build_plan import BuildPlan, PlanBox, PlanCamera
 from app.models.scene import SceneJSON, Wall
 
 
@@ -185,3 +186,41 @@ def plan_views(scene: SceneJSON, per_room: int = 2) -> list[CameraPose]:
         return [CameraPose(view_id="view_01",
                            position=(c.x, c.y, CAM_Z), target=(c.x, c.y, TARGET_Z))]
     return poses
+
+
+def build_plan(scene: SceneJSON, output_dir: str) -> BuildPlan:
+    scene = normalize_scene(scene)
+    fh = scene.floor_height
+    boxes: list[PlanBox] = []
+    door_by_wall: dict[str, list] = {}
+    win_by_wall: dict[str, list] = {}
+    for d in scene.doors:
+        door_by_wall.setdefault(d.wall_id or "", []).append(d)
+    for w in scene.windows:
+        win_by_wall.setdefault(w.wall_id or "", []).append(w)
+    for wall in scene.walls:
+        base = wall_box(wall, fh)
+        openings = []
+        for d in door_by_wall.get(wall.id, []):
+            openings.append(project_opening(base, d.position, d.width, 0.0, d.height))
+        for w in win_by_wall.get(wall.id, []):
+            openings.append(project_opening(base, w.position, w.width,
+                                            w.sill_height, w.sill_height + w.height))
+        for seg in segment_wall(base, openings):
+            boxes.append(PlanBox(center=list(seg.center), size=list(seg.size),
+                                 rot_z=seg.rot_z, kind="wall"))
+    for f in scene.furniture:
+        sx, sy, sz = f.size
+        boxes.append(PlanBox(center=[f.position[0], f.position[1], sz / 2.0],
+                             size=[sx, sy, sz], rot_z=f.rotation, kind="furniture"))
+    minx = min((b.center[0] - b.size[0] / 2.0) for b in boxes) if boxes else 0.0
+    maxx = max((b.center[0] + b.size[0] / 2.0) for b in boxes) if boxes else 0.0
+    miny = min((b.center[1] - b.size[1] / 2.0) for b in boxes) if boxes else 0.0
+    maxy = max((b.center[1] + b.size[1] / 2.0) for b in boxes) if boxes else 0.0
+    floor = PlanBox(center=[(minx + maxx) / 2.0, (miny + maxy) / 2.0, -50.0],
+                    size=[(maxx - minx) + 1000.0, (maxy - miny) + 1000.0, 100.0],
+                    kind="floor")
+    boxes.append(floor)
+    cameras = [PlanCamera(view_id=p.view_id, position=list(p.position),
+                          target=list(p.target)) for p in plan_views(scene)]
+    return BuildPlan(floor_height=fh, boxes=boxes, cameras=cameras, output_dir=output_dir)
