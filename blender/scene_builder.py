@@ -90,6 +90,21 @@ def _setup_freestyle(scene):
         ls.linestyle.color = (0.0, 0.0, 0.0)
 
 
+def _settle_depth_output(expected: str) -> None:
+    """FileOutput 会把 slot 名/帧号拼进 base_path——把实际产物归位到期望文件名。"""
+    import glob
+    import os
+    stem = expected[:-len(".png")]
+    candidates = [p for p in glob.glob(stem + "*") if p != expected]
+    if not candidates:
+        return
+    newest = max(candidates, key=os.path.getmtime)
+    os.replace(newest, expected)
+    for p in candidates:
+        if p != newest:
+            os.remove(p)
+
+
 def render_pass(scene, cam, pass_name, out_dir):
     out = os.path.join(out_dir, f"{cam['view_id']}_{pass_name}.png")
     scene.render.filepath = out
@@ -110,6 +125,8 @@ def render_pass(scene, cam, pass_name, out_dir):
             scene.use_nodes = False
         scene.view_layers[0].use_pass_mist = False
         scene.render.use_freestyle = False
+    if pass_name == "depth":
+        _settle_depth_output(out)
     return out
 
 
