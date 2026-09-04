@@ -32,6 +32,10 @@ def _segments_from(msp, layers: set[str]) -> list[tuple[Vec, Vec]]:
             segs.append(((e.dxf.start.x, e.dxf.start.y), (e.dxf.end.x, e.dxf.end.y)))
         elif e.dxftype() == "LWPOLYLINE":
             pts = [(p[0], p[1]) for p in e.get_points()]
+            # 闭合多段线：get_points 不重复首点，须补回末点→首点闭合边，
+            # 否则中心线网络断开、polygonize 房间不闭合（ODA 转换图纸墙即此形态）
+            if e.closed and len(pts) >= 3:
+                pts.append(pts[0])
             segs += list(pairwise(pts))
     return segs
 
