@@ -5,6 +5,7 @@ __pycache__/
 experiments/
 fixtures/control_maps/*
 !fixtures/control_maps/.gitkeep
+fixtures/cad/_converted/
 registry.db
 .pytest_cache/
 .ruff_cache/
