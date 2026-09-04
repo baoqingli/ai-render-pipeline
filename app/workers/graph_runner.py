@@ -73,17 +73,45 @@ async def main() -> None:
     s = get_settings()
     engine = await init_pg(s.pg_dsn)
     # valkey 6.1.1 无顶层 async_from_url（brief 笔误，redis-py 旧式 API）——
-    # 正确入口是 valkey.asyncio.from_url
-    vclient = valkey.asyncio.from_url(s.valkey_url)
+    # 正确入口是 valkey.asyncio.from_url。
+    # socket_timeout=None 必须显式：默认 socket 超时会掐死无限阻塞的 BLPOP
+    # （e2e 实测：作业到达前读超时 → TimeoutError → 消费者进程退出）
+    vclient = valkey.asyncio.from_url(s.valkey_url, socket_timeout=None)
     reg = ModelRegistry(s.registry_db_url)
     await reg.setup()
     models = await reg.list_enabled()
     comfy = any(m.engine == "comfy" for m in models)
+    comfy_engine = None
+    if comfy:
+        client = ComfyClient(s.comfy_url)
+        # ComfyUI 对权重名校验严格且 Windows 枚举为反斜杠路径——
+        # 启动时拉枚举做分隔符归一，默认正斜杠名才能过 ControlNetLoader 校验
+        import httpx
+
+        from app.engines.comfy import (DEFAULT_CHECKPOINT, DEFAULT_CONTROLNET_DEPTH,
+                                       DEFAULT_CONTROLNET_LINEART)
+
+        def _resolve(available: list[str], wanted: str) -> str:
+            if wanted in available:
+                return wanted
+            alt = wanted.replace("/", "\\")
+            if alt in available:
+                return alt
+            return wanted
+
+        async with httpx.AsyncClient(timeout=10) as http:
+            ckpts = (await http.get(f"{s.comfy_url}/object_info/CheckpointLoaderSimple")
+                     ).json()["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
+            cns = (await http.get(f"{s.comfy_url}/object_info/ControlNetLoader")
+                   ).json()["ControlNetLoader"]["input"]["required"]["control_net_name"][0]
+        comfy_engine = ComfyEngine(
+            client=client, template_dir=Path("workflows"),
+            out_dir=Path(s.workspace_dir) / "renders",
+            checkpoint=_resolve(ckpts, DEFAULT_CHECKPOINT),
+            controlnet_depth=_resolve(cns, DEFAULT_CONTROLNET_DEPTH),
+            controlnet_lineart=_resolve(cns, DEFAULT_CONTROLNET_LINEART))
     deps = GraphDeps(
-        engines={"comfy": ComfyEngine(client=ComfyClient(s.comfy_url),
-                                      template_dir=Path("workflows"),
-                                      out_dir=Path(s.workspace_dir) / "renders")}
-        if comfy else {},
+        engines={"comfy": comfy_engine} if comfy_engine else {},
         registry_models=models, variants=s.render_variants,
         data_dir=Path(s.data_dir))
 
