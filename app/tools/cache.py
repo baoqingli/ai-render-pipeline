@@ -8,6 +8,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "api_render": "1",
     "convert_dwg": "1",
     "inspect_dxf": "1",
+    "parse_scene": "1",
 }
 
 
