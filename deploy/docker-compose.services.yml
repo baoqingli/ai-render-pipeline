@@ -1,0 +1,30 @@
+# deploy/docker-compose.services.yml
+# e2e/开发基础设施：PG（项目状态表 + langgraph 检查点）+ Valkey（作业队列 + SSE pubsub）。
+# 渲染栈（ComfyUI / vLLM）见 docker-compose.phase1.yml——按需单独起，避免争抢显存。
+# .env 需追加（详见 docs/e2e-2026-09.md §配置）：
+#   ARP_PG_DSN=postgresql+psycopg://arp:arp@localhost:5432/arp
+#   ARP_VALKEY_URL=redis://localhost:6379/0
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: arp
+      POSTGRES_PASSWORD: arp
+      POSTGRES_DB: arp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arp -d arp"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  valkey:
+    image: valkey/valkey:8
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
