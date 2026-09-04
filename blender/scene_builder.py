@@ -58,9 +58,8 @@ def _setup_world(scene):
 
 
 def _comp_tree(scene):
-    """Blender 5.x: 合成器节点组在 scene.compositing_node_group，经
-    bpy.data.node_groups.new(type="CompositorNodeTree") 创建（4.x 前为
-    scene.use_nodes=True 后的 scene.node_tree）。"""
+    """Blender 4.5+/5.x：合成器节点组在 scene.compositing_node_group，经
+    bpy.data.node_groups.new(type="CompositorNodeTree") 创建。无 4.x 回退。"""
     nt = getattr(scene, "compositing_node_group", None)
     if nt is not None:
         return nt
@@ -99,21 +98,6 @@ def _setup_freestyle(scene):
         ls = vl.freestyle_settings.linesets.new("ARP")
         ls.linestyle = bpy.data.linestyles.new("ARP_LINE")
         ls.linestyle.color = (0.0, 0.0, 0.0)
-
-
-def _settle_depth_output(expected: str) -> None:
-    """FileOutput 会把 slot 名/帧号拼进 base_path——把实际产物归位到期望文件名。"""
-    import glob
-    import os
-    stem = expected[:-len(".png")]
-    candidates = [p for p in glob.glob(stem + "*") if p != expected]
-    if not candidates:
-        return
-    newest = max(candidates, key=os.path.getmtime)
-    os.replace(newest, expected)
-    for p in candidates:
-        if p != newest:
-            os.remove(p)
 
 
 def render_pass(scene, cam, pass_name, out_dir):
