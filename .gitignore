@@ -7,6 +7,7 @@ fixtures/control_maps/*
 !fixtures/control_maps/.gitkeep
 fixtures/cad/_converted/
 registry.db
+e2e.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

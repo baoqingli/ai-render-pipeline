@@ -88,8 +88,11 @@ async def main() -> None:
         # 启动时拉枚举做分隔符归一，默认正斜杠名才能过 ControlNetLoader 校验
         import httpx
 
-        from app.engines.comfy import (DEFAULT_CHECKPOINT, DEFAULT_CONTROLNET_DEPTH,
-                                       DEFAULT_CONTROLNET_LINEART)
+        from app.engines.comfy import (
+            DEFAULT_CHECKPOINT,
+            DEFAULT_CONTROLNET_DEPTH,
+            DEFAULT_CONTROLNET_LINEART,
+        )
 
         def _resolve(available: list[str], wanted: str) -> str:
             if wanted in available:
