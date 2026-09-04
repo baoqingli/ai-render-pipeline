@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     comfy_url: str = "http://localhost:8188"
     oda_exe: str = "ODAFileConverter"
+    blender_exe: str = "blender"
     workspace_dir: str = "experiments"
     registry_db_url: str = "sqlite+aiosqlite:///./registry.db"
     gemini_api_key: str | None = None
