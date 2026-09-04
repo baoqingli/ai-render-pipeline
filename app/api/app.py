@@ -85,7 +85,12 @@ def create_app(deps: ApiDeps) -> FastAPI:
                     msg = await ps.get_message(ignore_subscribe_messages=True,
                                                timeout=10)
                     if msg is not None and msg.data:
-                        yield f"data: {msg.data}\n\n"
+                        # 真 valkey 默认 decode_responses=False：msg.data 是
+                        # bytes，直接进 f-string 会渲染成 b'...' repr（帧语法
+                        # 合法、载荷损坏），统一解码后再下发
+                        data = (msg.data.decode() if isinstance(msg.data, bytes)
+                                else msg.data)
+                        yield f"data: {data}\n\n"
                     else:
                         yield ": ping\n\n"
             finally:

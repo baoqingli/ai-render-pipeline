@@ -13,6 +13,7 @@ import contextlib
 import json
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -160,7 +161,12 @@ async def _drive_sse(app, pid: str):
     return task, chunks, headers, chunk_added
 
 
-async def test_events_sse_streams_published(tmp_path):
+@pytest.mark.parametrize(
+    "payload", ['{"stage":"finalized"}', b'{"stage":"finalized"}'],
+    ids=["str-decoded-client", "bytes-raw-client"])
+async def test_events_sse_streams_published(tmp_path, payload):
+    """bytes 变体锁定解码：真 valkey 默认 decode_responses=False，pubsub
+    msg.data 是 bytes——不解码则 SSE 帧渲染成 b'...' repr，载荷损坏。"""
     app, vk = await _make_app(tmp_path)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -169,7 +175,7 @@ async def test_events_sse_streams_published(tmp_path):
 
     task, chunks, headers, chunk_added = await _drive_sse(app, pid)
     await asyncio.sleep(0.3)  # 让 subscribe 先注册到 StubValkey.subs
-    await vk.publish(f"arp:events:{pid}", '{"stage":"finalized"}')
+    await vk.publish(f"arp:events:{pid}", payload)
 
     async def _until_finalized():
         while not any(b"finalized" in c for c in chunks):
@@ -184,5 +190,6 @@ async def test_events_sse_streams_published(tmp_path):
 
     body = b"".join(chunks)
     assert b'data: {"stage":"finalized"}\n\n' in body
+    assert b"b'" not in body  # bytes repr 不许漏进 SSE 帧
     assert any(k.lower() == b"content-type" and v.startswith(b"text/event-stream")
                for k, v in headers)

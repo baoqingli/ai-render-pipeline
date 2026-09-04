@@ -19,6 +19,9 @@ async def make_api_deps(settings) -> ApiDeps:
 
     from app.infra.pg import init_pg
     engine = await init_pg(settings.pg_dsn)
+    # decode_responses=True：pubsub msg.data 直接是 str（SSE 帧下发前置条件；
+    # app.py gen() 对 bytes 仍防御性解码，双保险）
     return ApiDeps(engine=engine,
-                   vclient=valkey.asyncio.from_url(settings.valkey_url),
+                   vclient=valkey.asyncio.from_url(settings.valkey_url,
+                                                   decode_responses=True),
                    data_dir=Path(settings.data_dir))
