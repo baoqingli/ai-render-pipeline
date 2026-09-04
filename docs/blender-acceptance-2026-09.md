@@ -25,8 +25,8 @@
    `bpy.data.node_groups.new(type="CompositorNodeTree")`。新增 `_comp_tree()` 双版本兼容助手。
 2. **FileOutput 节点仅支持 OPEN_EXR_MULTILAYER**（5.x 新合成器限制，PNG 枚举不存在）。
    改道：**Mist → Group Output 直出**——组输出即渲染结果，`write_still=True` 直接落 PNG
-   （`.png` 结尾的 filepath 不加帧号，实测精确命名）。`_settle_depth_output` 保留但不再触发
-   （防御性保留，无调用路径）。
+   （`.png` 结尾的 filepath 不加帧号，实测精确命名）。原 `_settle_depth_output` 归位函数
+   随之失去调用路径，已在终审修复波中连同静态标记一并删除。
 3. **Blender 子进程 cwd 与调用方不一致**（实测渲染落到 `C:\experiments\...`）——
    runner 侧 `Path(out_dir).resolve()` 绝对路径修复。
 4. **depth 直出后清链**：`finally` 中清空合成组节点并摘除 `compositing_node_group`，恢复后续 pass 直出。
