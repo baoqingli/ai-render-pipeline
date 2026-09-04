@@ -72,7 +72,9 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None) -> ToolRe
     strips: dict[str, BaseGeometry] = {}
     for i, w in enumerate(walls):
         c = centers[i]
-        strips[w.id] = LineString([(c[0][0], c[0][1]), (c[1][0], c[1][1])]).buffer(c[2] / 2)
+        strips[w.id] = LineString([(c[0][0], c[0][1]), (c[1][0], c[1][1])]).buffer(
+            c[2] / 2, cap_style=2
+        )
 
     # 房间：中心线网络 polygonize。语料实测：内墙中心线端点落在底/顶墙中心线中段
     # （T 型 junction），直接 polygonize 只出外环 1 个面；必须先 unary_union 结点化
@@ -102,10 +104,10 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None) -> ToolRe
         m = WIDTH_RE.search(name)
         width = float(m.group(1)) if m else None
         lw = f"{layer} {name}".lower()
-        if "door" in lw or "门" in name:
+        if "door" in lw or "门" in lw:
             doors.append(Door(id=f"door_{len(doors)+1:03d}", position=[pos.x, pos.y],
                               width=width or 900.0, wall_id=_nearest_wall_id(pos, walls, strips)))
-        elif "window" in lw or "窗" in name:
+        elif "window" in lw or "窗" in lw:
             windows.append(Window(id=f"window_{len(windows)+1:03d}", position=[pos.x, pos.y],
                                   width=width or 1500.0,
                                   wall_id=_nearest_wall_id(pos, walls, strips)))

@@ -57,8 +57,9 @@ def inspect_dxf(dxf_path: str | Path) -> CadReport:
         elif t in TEXT_TYPES:
             s.text_count += 1
             content = e.dxf.text if t == "TEXT" else e.text  # type: ignore[attr-defined]
-            pos = _xy(e.dxf.insert) if t == "MTEXT" else _xy(e.dxf.align_point) \
-                if getattr(e.dxf, "align_point", None) else [0.0, 0.0]
+            # TEXT 默认对齐时 align_point 未设置（None），真实位置在 insert；
+            # MTEXT 位置恒在 insert
+            pos = _xy(e.dxf.insert) if t == "MTEXT" else _xy(e.dxf.align_point or e.dxf.insert)
             notes.append(TextNote(layer=layer, content=content.strip(), position=pos))
         elif t == "INSERT":
             s.insert_count += 1

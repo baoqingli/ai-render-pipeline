@@ -24,8 +24,9 @@ async def convert_dwg(dwg_path: str | Path, out_dir: str | Path) -> ToolResult[P
             error=ToolError(code="INPUT_INVALID", message=f"bad dwg: {src}"),
         )
     key = build_cache_key("convert_dwg", _sha(src), out.name)
-    cached = out / (src.stem + ".dxf")
-    if cached.exists():  # 简式缓存：产物存在即命中（键含内容 hash，上游换了文件则重建）
+    cached = out / f"{src.stem}.{_sha(src)}.dxf"
+    # 产物名含内容 hash：同 stem 换内容即新名字触发重转；旧产物不清理
+    if cached.exists():
         return ToolResult(ok=True, data=cached, cache_key=key, cache_hit=True)
     exe = get_settings().oda_exe
     out.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
@@ -49,7 +50,8 @@ async def convert_dwg(dwg_path: str | Path, out_dir: str | Path) -> ToolResult[P
             ok=False,
             error=ToolError(code="ODA_MISSING", message=f"ODA File Converter not found: {exe}"),
         )
-    if proc.returncode != 0 or not cached.exists():
+    plain = out / f"{src.stem}.dxf"  # ODA 固定写 <stem>.dxf
+    if proc.returncode != 0 or not plain.exists():
         return ToolResult(
             ok=False,
             error=ToolError(
@@ -57,4 +59,5 @@ async def convert_dwg(dwg_path: str | Path, out_dir: str | Path) -> ToolResult[P
                 message=f"ODA failed rc={proc.returncode}: {proc.stdout[:120]!r}",
             ),
         )
+    plain.replace(cached)  # 挂上内容 hash，成为下次存在性命中判据
     return ToolResult(ok=True, data=cached, cache_key=key, metrics=Metrics())

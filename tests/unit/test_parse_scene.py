@@ -56,3 +56,40 @@ def test_parse_apartment_fixture(tmp_path: Path):
     assert len(scene.walls) >= 5                    # 6 条墙边（配对后 5-6 段中心线）
     assert scene.furniture and scene.furniture[0].source == "cad"
     assert scene.furniture[0].type == "sofa"
+
+
+def test_parse_classifies_window_via_chinese_layer(tmp_path: Path):
+    # 真实图纸形态（recon 发现 5）：窗块名 $WINLIB2D$00000005 无任何英文/数字关键词，
+    # 仅图层 GL-玻璃窗线 可识别——中文必须扫图层+块名合并串，不能只看块名
+    doc = ezdxf.new("R2018")
+    doc.layers.add("GL-玻璃窗线")
+    doc.blocks.new(name="$WINLIB$00001")
+    doc.modelspace().add_blockref(
+        "$WINLIB$00001", (3000.0, 4000.0), dxfattribs={"layer": "GL-玻璃窗线"}
+    )
+    p = tmp_path / "w.dxf"
+    doc.saveas(p)
+    result = parse_scene(p)
+    assert result.ok
+    scene = result.data
+    assert scene is not None
+    assert len(scene.windows) == 1                 # 经图层"窗"字识别
+    assert scene.furniture == []                   # 不得误入家具
+
+
+def test_parse_classifies_door_via_chinese_layer(tmp_path: Path):
+    # 镜像：真实图纸门块 MS11 无关键词，仅图层 A-建筑门 可识别
+    doc = ezdxf.new("R2018")
+    doc.layers.add("A-建筑门")
+    doc.blocks.new(name="MS11")
+    doc.modelspace().add_blockref(
+        "MS11", (4000.0, 1500.0), dxfattribs={"layer": "A-建筑门"}
+    )
+    p = tmp_path / "d.dxf"
+    doc.saveas(p)
+    result = parse_scene(p)
+    assert result.ok
+    scene = result.data
+    assert scene is not None
+    assert len(scene.doors) == 1                   # 经图层"门"字识别
+    assert scene.furniture == []
