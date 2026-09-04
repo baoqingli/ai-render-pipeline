@@ -21,7 +21,8 @@ async def build_white_model(scene_json_path: str | Path, out_dir: str | Path,
                             blender_exe: str | None = None) -> ToolResult[Path]:
     from app.core.config import get_settings
     from app.tools.blender.geom import build_plan
-    src, out = Path(scene_json_path), Path(out_dir)
+    # 绝对路径：Blender 子进程 cwd 与调用方不一致
+    src, out = Path(scene_json_path), Path(out_dir).resolve()  # noqa: ASYNC240
     if not src.exists():  # noqa: ASYNC240
         return ToolResult(ok=False, error=ToolError(code="INPUT_INVALID",
                                                     message=f"scene not found: {src}"))
@@ -35,7 +36,7 @@ async def build_white_model(scene_json_path: str | Path, out_dir: str | Path,
     key = build_cache_key("build_white_model", _sha(src), out.name)
     if all((out / n).exists() for n in expected):
         return ToolResult(ok=True, data=out, cache_key=key, cache_hit=True)
-    out.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+    out.mkdir(parents=True, exist_ok=True)
     plan_path = out / "build_plan.json"
     plan_path.write_text(plan.model_dump_json(), encoding="utf-8")
     exe = blender_exe or get_settings().blender_exe

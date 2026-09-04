@@ -57,20 +57,31 @@ def _setup_world(scene):
         bg.inputs[1].default_value = 1.0
 
 
-def _setup_depth_output(scene, path):
+def _comp_tree(scene):
+    """Blender 5.x: 合成器节点组在 scene.compositing_node_group，经
+    bpy.data.node_groups.new(type="CompositorNodeTree") 创建（4.x 前为
+    scene.use_nodes=True 后的 scene.node_tree）。"""
+    nt = getattr(scene, "compositing_node_group", None)
+    if nt is not None:
+        return nt
+    nt = bpy.data.node_groups.new("ARP_COMP", "CompositorNodeTree")
+    scene.compositing_node_group = nt
+    return nt
+
+
+def _setup_depth_output(scene):
+    """Blender 5.x 合成器为节点组形态，FileOutput 仅支持 EXR——改为
+    Mist → Group Output 直出：组输出即渲染结果，write_still 直接落 PNG。"""
     scene.view_layers[0].use_pass_mist = True
     diag = _scene_diag(scene)
     ms = scene.world.mist_settings
     ms.start, ms.depth, ms.falloff = 0.0, diag * 1.5, "LINEAR"
-    scene.use_nodes = True
-    nt = scene.node_tree
+    nt = _comp_tree(scene)
     nt.nodes.clear()
+    nt.interface.new_socket(name="Image", in_out='OUTPUT', socket_type='NodeSocketColor')
     rl = nt.nodes.new("CompositorNodeRLayers")
-    fo = nt.nodes.new("CompositorNodeOutputFile")
-    fo.format.file_format, fo.format.color_mode = "PNG", "BW"
-    fo.base_path = path
-    nt.links.new(rl.outputs["Mist"], fo.inputs["Image"])
-    return fo
+    go = nt.nodes.new("NodeGroupOutput")
+    nt.links.new(rl.outputs["Mist"], go.inputs["Image"])
 
 
 def _scene_diag(scene) -> float:
@@ -109,24 +120,23 @@ def render_pass(scene, cam, pass_name, out_dir):
     out = os.path.join(out_dir, f"{cam['view_id']}_{pass_name}.png")
     scene.render.filepath = out
     scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "BW" if pass_name == "depth" else "RGB"
     scene.render.resolution_x, scene.render.resolution_y = 1024, 768
-    fo = None
     scene.render.use_freestyle = False
-    scene.use_nodes = False
     scene.view_layers[0].use_pass_mist = False
     if pass_name == "depth":
-        fo = _setup_depth_output(scene, out)
+        _setup_depth_output(scene)
     elif pass_name == "lineart":
         _setup_freestyle(scene)
     try:
-        bpy.ops.render.render(write_still=(pass_name != "depth"))
+        bpy.ops.render.render(write_still=True)
     finally:
-        if fo is not None:
-            scene.use_nodes = False
+        if pass_name == "depth":
+            _comp_tree(scene).nodes.clear()          # 摘除合成链，恢复直出
+            if hasattr(scene, "compositing_node_group"):
+                scene.compositing_node_group = None
         scene.view_layers[0].use_pass_mist = False
         scene.render.use_freestyle = False
-    if pass_name == "depth":
-        _settle_depth_output(out)
     return out
 
 
