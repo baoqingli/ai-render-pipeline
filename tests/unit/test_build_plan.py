@@ -34,3 +34,13 @@ def test_build_plan_json_roundtrip():
     data = json.loads(plan.model_dump_json())
     assert data["passes"] == ["depth", "lineart", "white"]
     assert BuildPlan.model_validate(data) == plan
+
+
+def test_build_plan_floor_covers_rotated_wall_footprint():
+    """y 向墙（rot_z=90°）：地板 AABB 须按旋转后角点范围计算，覆盖墙 y 足迹。"""
+    scene = SceneJSON(walls=[Wall(id="wy", polygon=[[-100.0, 0.0], [100.0, 0.0],
+                                                    [100.0, 4000.0], [-100.0, 4000.0]])])
+    plan = build_plan(scene, output_dir="x")
+    floor = next(b for b in plan.boxes if b.kind == "floor")
+    assert floor.size[1] >= 4000.0 + 1000.0 - 1e-6   # 外扩 500/侧 → 覆盖墙 y 足迹
+    assert floor.size[0] <= 200.0 + 1000.0 + 1.0     # x 向仅厚度+外扩，不被拉宽

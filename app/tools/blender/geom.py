@@ -188,6 +188,16 @@ def plan_views(scene: SceneJSON, per_room: int = 2) -> list[CameraPose]:
     return poses
 
 
+def _aabb(box: PlanBox) -> tuple[float, float, float, float]:
+    """旋转盒的世界轴对齐包围盒 (minx, maxx, miny, maxy)——按角点投影范围。"""
+    import math
+    c, s = math.cos(box.rot_z), math.sin(box.rot_z)
+    sx, sy = box.size[0] / 2.0, box.size[1] / 2.0
+    hx = abs(sx * c) + abs(sy * s)
+    hy = abs(sx * s) + abs(sy * c)
+    return (box.center[0] - hx, box.center[0] + hx, box.center[1] - hy, box.center[1] + hy)
+
+
 def build_plan(scene: SceneJSON, output_dir: str) -> BuildPlan:
     scene = normalize_scene(scene)
     fh = scene.floor_height
@@ -213,10 +223,11 @@ def build_plan(scene: SceneJSON, output_dir: str) -> BuildPlan:
         sx, sy, sz = f.size
         boxes.append(PlanBox(center=[f.position[0], f.position[1], sz / 2.0],
                              size=[sx, sy, sz], rot_z=f.rotation, kind="furniture"))
-    minx = min((b.center[0] - b.size[0] / 2.0) for b in boxes) if boxes else 0.0
-    maxx = max((b.center[0] + b.size[0] / 2.0) for b in boxes) if boxes else 0.0
-    miny = min((b.center[1] - b.size[1] / 2.0) for b in boxes) if boxes else 0.0
-    maxy = max((b.center[1] + b.size[1] / 2.0) for b in boxes) if boxes else 0.0
+    aabbs = [_aabb(b) for b in boxes]
+    minx = min(a[0] for a in aabbs) if aabbs else 0.0
+    maxx = max(a[1] for a in aabbs) if aabbs else 0.0
+    miny = min(a[2] for a in aabbs) if aabbs else 0.0
+    maxy = max(a[3] for a in aabbs) if aabbs else 0.0
     floor = PlanBox(center=[(minx + maxx) / 2.0, (miny + maxy) / 2.0, -50.0],
                     size=[(maxx - minx) + 1000.0, (maxy - miny) + 1000.0, 100.0],
                     kind="floor")
