@@ -34,3 +34,5 @@ class CadReport(BaseModel):
     unit_guess: Literal["mm", "m"] = "mm"
     confidence: float = 1.0
     wall_layer_candidates: list[str] = []
+    room_layer_candidates: list[str] = []
+    ceiling_layer_candidates: list[str] = []

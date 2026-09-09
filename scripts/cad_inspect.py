@@ -32,6 +32,7 @@ def render_report(report: CadReport, scene: SceneJSON | None, fallbacks: list[st
              f"单位推断: {report.unit_guess}",
              f"- 层高候选: {report.floor_height_candidates or '无（用默认 2800）'}",
              f"- 墙图层候选: {report.wall_layer_candidates or '无（走默认墙厚兜底）'}",
+             f"- 完成面/房间图层候选: {report.room_layer_candidates or '无'}",
              f"- fallbacks: {fallbacks or '无'}", "",
              "| layer | line | pline | text | insert | other |",
              "| --- | --- | --- | --- | --- | --- |"]

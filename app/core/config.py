@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:8001/v1"
     llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
     llm_api_key: str | None = None
+    fidelity_model: str | None = None   # VLM Fidelity Check 模型；缺省回落 llm_model
+    vision_model: str = "glm-5.3-flash"  # CAD 图纸识别 Agent 模型（多视图读图）
     comfy_url: str = "http://localhost:8188"
     oda_exe: str = "ODAFileConverter"
     blender_exe: str = "blender"

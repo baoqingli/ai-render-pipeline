@@ -32,7 +32,9 @@ async def test_build_success(tmp_path, monkeypatch):
     result = await runner.build_white_model(scene, tmp_path / "model",
                                             blender_exe="blender")
     assert result.ok and result.data is not None
-    assert (result.data / "view_01_white.png").exists()
+    # 新机位：view_iso（等轴测）和可能有view_interior
+    assert any((result.data / f"{vid}_white.png").exists()
+               for vid in ["view_iso", "view_interior", "view_01"])
 
 
 async def test_cache_hit_second_call(tmp_path, monkeypatch):

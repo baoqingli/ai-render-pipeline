@@ -6,7 +6,11 @@ import ezdxf
 
 from app.models.cad_report import BlockStat, CadReport, LayerStat, TextNote
 
-WALL_LAYER_RE = re.compile(r"(wall|墙|a-wall|arch)", re.IGNORECASE)
+WALL_LAYER_RE = re.compile(r"(wall|墙|a-wall|arch|建筑)", re.IGNORECASE)
+# 完成面图层：精装图中代表空间边界的专有图层名关键词，不得与 wall 共用
+ROOM_LAYER_RE = re.compile(r"(完成面|finish|P-建筑|finished.?surface)", re.IGNORECASE)
+# 天花轮廓线图层：精装图中各功能区天花板轮廓 = 房间水平边界的最可靠来源
+CEILING_LAYER_RE = re.compile(r"(天花.*轮廓|ceiling.*contour|C-天花|C-ceiling)", re.IGNORECASE)
 HEIGHT_RE = re.compile(r"层高\s*(\d{3,4})")
 
 LINE_TYPES = {"LINE", "LWPOLYLINE", "POLYLINE"}
@@ -74,9 +78,15 @@ def inspect_dxf(dxf_path: str | Path) -> CadReport:
     unit: str = "mm" if ext > 1000 or ext == 0 else "m"
     wall_candidates = [n for n, s in layers.items()
                        if WALL_LAYER_RE.search(n) and (s.line_count + s.polyline_count) >= 4]
+    room_candidates = [n for n, s in layers.items()
+                       if ROOM_LAYER_RE.search(n) and s.polyline_count >= 2]
+    ceiling_candidates = [n for n, s in layers.items()
+                          if CEILING_LAYER_RE.search(n) and s.polyline_count >= 4]
     confidence = 1.0
-    if not wall_candidates:
+    if not wall_candidates and not room_candidates and not ceiling_candidates:
         confidence -= 0.4
+    elif not wall_candidates:
+        confidence -= 0.1   # 只有完成面/天花轮廓图层——精装图常见，轻扣
     if not heights:
         confidence -= 0.1
     if proxies:
@@ -87,4 +97,6 @@ def inspect_dxf(dxf_path: str | Path) -> CadReport:
                      blocks=list(blocks.values()), proxy_entity_count=proxies,
                      text_annotations=notes, floor_height_candidates=heights,
                      unit_guess=unit,  # type: ignore[arg-type]
-                     confidence=round(confidence, 2), wall_layer_candidates=wall_candidates)
+                     confidence=round(confidence, 2), wall_layer_candidates=wall_candidates,
+                     room_layer_candidates=room_candidates,
+                     ceiling_layer_candidates=ceiling_candidates)

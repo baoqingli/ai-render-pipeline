@@ -15,7 +15,7 @@ def test_build_plan_assembles_all_kinds():
     kinds = {b.kind for b in plan.boxes}
     assert kinds == {"wall", "floor"}                    # 无家具/房间 → wall+floor
     assert plan.floor_height == 2800.0
-    assert plan.cameras and plan.cameras[0].view_id == "view_01"   # 无房间→全局降级
+    assert plan.cameras and plan.cameras[0].view_id == "view_iso"   # 无房间→等轴测降级
     floor = next(b for b in plan.boxes if b.kind == "floor")
     assert floor.center[2] == -50.0 and floor.size[2] == 100.0
     # 归一化后墙 x 从 0 起；地板外扩 500 → 中心 (3000, 0)

@@ -22,6 +22,8 @@ def make_chat_model(settings: Settings | None = None,
             max_retries=2,
             timeout=None,
             stop=None,
+            # glm-5.3/flash 为推理模型：默认 max_tokens 会被思考块耗尽导致正文为空
+            max_tokens=16384,  # type: ignore[call-arg]  # langchain-anthropic 版本差异
         )
     # OpenAI 兼容（vLLM 自部署 / GLM v4 等按量付费路径）。
     # Spec D4：Phase 1 默认 GLM API（key 进 Settings）；未配 key 时视为

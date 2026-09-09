@@ -1,4 +1,10 @@
-"""白模纯几何层：归一化、墙体矩形化、开洞分段、机位规划、BuildPlan 组装。全程 mm。"""
+"""白模纯几何层：归一化、墙体矩形化、开洞分段、机位规划、BuildPlan 组装。全程 mm。
+
+设计见 docs/white-model-fix-plan-2026-09.md §4 P0-2/P0-5：
+- 墙单一路径（scene.walls 统一列表，parse 已保证房间边+条带缝合），全高 + 门窗开洞；
+- view_iso 改正交俯视（对齐验收基准图）；窗洞生成棂条（kind="frame"）；
+- 家具带 label（规范类型），scene_builder 据此选低模套件。
+"""
 from typing import NamedTuple
 
 from shapely.geometry import Point, Polygon
@@ -6,6 +12,7 @@ from shapely.ops import unary_union
 
 from app.models.build_plan import BuildPlan, PlanBox, PlanCamera
 from app.models.scene import SceneJSON, Wall
+from app.tools.cad.rules import WINDOW_MULLION_INTERVAL
 
 
 class Box(NamedTuple):
@@ -140,54 +147,115 @@ def segment_wall(box: Box, openings: list[Opening]) -> list[Box]:
     return segs
 
 
+def window_frames(box: Box, opening: Opening) -> list[Box]:
+    """窗洞棂条：开洞宽度内按 WINDOW_MULLION_INTERVAL 均布竖向细框（kind=frame）。"""
+    lo, hi = opening.u - opening.width / 2.0, opening.u + opening.width / 2.0
+    n = max(1, int(opening.width // WINDOW_MULLION_INTERVAL))
+    frames: list[Box] = []
+    for k in range(1, n + 1):
+        u = lo + (hi - lo) * k / (n + 1)
+        b = _local_box(box, u, 40.0, opening.z_bot, opening.z_top)
+        frames.append(Box(center=b.center, size=(b.size[0], b.size[1] * 0.5, b.size[2]),
+                          rot_z=b.rot_z))
+    return frames
+
+
 class CameraPose(NamedTuple):
     view_id: str
     position: tuple[float, float, float]
     target: tuple[float, float, float]
 
 
-CAM_Z = 1500.0
-TARGET_Z = 1200.0
 SHRINK = 400.0
 
 
 def plan_views(scene: SceneJSON, per_room: int = 2) -> list[CameraPose]:
-    """机位规划：房间内候选（质心 + 长轴 ±25%）取 buffer(-400) 内者，按到边界距离评分取前
-    per_room；无房间或全部候选落外 → 全局降级单机位（墙并集质心；无墙再降级房间并集质心）。
+    """机位规划（数量与名称被单测锁定：iso + interior 共 2）：
+    - view_iso：正交俯视（对齐验收基准图的"模型俯瞰"形态），相机在中心上方轻微倾斜
+    - view_interior：最大房间内角透视（全高墙下 eye 1600mm）
     """
+    import math
     scene = normalize_scene(scene)
     poses: list[CameraPose] = []
-    n = 0
-    for room in scene.rooms:
-        poly = Polygon(room.polygon).buffer(-SHRINK)
+
+    all_polys = ([Polygon(r.polygon) for r in scene.rooms]
+                 or [Polygon(w.polygon) for w in scene.walls])
+    if not all_polys:
+        return []
+
+    merged = unary_union(all_polys)
+    minx, miny, maxx, maxy = merged.bounds
+    cx = (minx + maxx) / 2.0
+    cy = (miny + maxy) / 2.0
+    diag = math.hypot(maxx - minx, maxy - miny)
+    fh = scene.floor_height
+
+    # 视角1：正交俯视——正上方零旋转（与 CAD 截图轴对齐，便于逐项对比）
+    poses.append(CameraPose(
+        view_id="view_iso",
+        position=(cx, cy, fh + diag * 0.9),
+        target=(cx, cy, 0.0),
+    ))
+
+    # 视角2：室内透视——最大房间缩进多边形顶点作机位（bbox 角点对 L 形房间可能落在
+    # 房间外/墙内），朝最远顶点看（小房间质心太近，画面被近处地面填满）
+    if scene.rooms:
+        largest = max((Polygon(r.polygon) for r in scene.rooms), key=lambda p: p.area)
+        shrunk = largest.buffer(-SHRINK)
+        if not shrunk.is_empty:
+            if shrunk.geom_type == "MultiPolygon":
+                shrunk = max(shrunk.geoms, key=lambda g: g.area)
+            bx1, by1, bx2, by2 = shrunk.bounds
+            anchor = (bx1 + (bx2 - bx1) * 0.15, by1 + (by2 - by1) * 0.15)
+            coords = list(shrunk.exterior.coords)
+            vtx_near = min(coords, key=lambda p: math.hypot(p[0] - anchor[0],
+                                                            p[1] - anchor[1]))
+            vtx_far = max(coords, key=lambda p: math.hypot(p[0] - vtx_near[0],
+                                                           p[1] - vtx_near[1]))
+            poses.append(CameraPose(
+                view_id="view_interior",
+                position=(vtx_near[0], vtx_near[1], fh * 0.57),
+                target=(vtx_far[0], vtx_far[1], fh * 0.38),
+            ))
+
+    return poses
+
+
+def plan_interior_candidates(scene: SceneJSON, max_rooms: int = 1) -> list[CameraPose]:
+    """内视相机候选：最大房间（面积最大）一对对角机位。
+
+    只取最大房间——深度方差指标会偏向小房间（小空间深度变化大），
+    但内视图的价值是展示主生活空间。候选须经 runner 的深度校验
+    在两个对角机位间择优，避免单机位贴墙/空白。
+    """
+    import math
+    scene = normalize_scene(scene)
+    out: list[CameraPose] = []
+    rooms = sorted(scene.rooms, key=lambda r: -Polygon(r.polygon).area)[:max_rooms]
+    for r in rooms:
+        poly = Polygon(r.polygon).buffer(-SHRINK)
         if poly.is_empty:
             continue
-        if poly.geom_type == "MultiPolygon":          # 凹形房收缩成多片——取最大片
+        if poly.geom_type == "MultiPolygon":
             poly = max(poly.geoms, key=lambda g: g.area)
-        minx, miny, maxx, maxy = poly.bounds
-        cx, cy = poly.centroid.x, poly.centroid.y
-        long_x = (maxx - minx) >= (maxy - miny)
-        span = (maxx - minx) if long_x else (maxy - miny)
-        cands = [(cx, cy)]
-        for s in (-0.25, 0.25):
-            cands.append((cx + s * span, cy) if long_x else (cx, cy + s * span))
-        inside = [(x, y) for x, y in cands if poly.contains(Point(x, y))]
-        if not inside:
+        coords = list(poly.exterior.coords)[:-1]
+        if len(coords) < 3:
             continue
-        inside.sort(key=lambda p: -poly.exterior.distance(Point(p[0], p[1])))
-        for x, y in inside[:per_room]:
-            n += 1
-            poses.append(CameraPose(view_id=f"view_{n:02d}",
-                                    position=(x, y, CAM_Z), target=(cx, cy, TARGET_Z)))
-    if not poses:                                    # 全局降级（无房间/全落外）
-        geoms = [Polygon(w.polygon) for w in scene.walls] \
-            or [Polygon(r.polygon) for r in scene.rooms]
-        if not geoms:
-            return []
-        c = unary_union(geoms).centroid
-        return [CameraPose(view_id="view_01",
-                           position=(c.x, c.y, CAM_Z), target=(c.x, c.y, TARGET_Z))]
-    return poses
+        best = None
+        for i in range(len(coords)):
+            for j in range(i + 1, len(coords)):
+                d = math.hypot(coords[i][0] - coords[j][0], coords[i][1] - coords[j][1])
+                if best is None or d > best[0]:
+                    best = (d, coords[i], coords[j])
+        if best is None:
+            continue
+        _, a, b = best
+        k = len(out)
+        out.append(CameraPose(f"view_int_{k}a",
+                              (a[0], a[1], 1600.0), (b[0], b[1], 1100.0)))
+        out.append(CameraPose(f"view_int_{k}b",
+                              (b[0], b[1], 1600.0), (a[0], a[1], 1100.0)))
+    return out
 
 
 def _aabb(box: PlanBox) -> tuple[float, float, float, float]:
@@ -201,9 +269,15 @@ def _aabb(box: PlanBox) -> tuple[float, float, float, float]:
 
 
 def build_plan(scene: SceneJSON, output_dir: str) -> BuildPlan:
+    import math
     scene = normalize_scene(scene)
     fh = scene.floor_height
     boxes: list[PlanBox] = []
+
+    # 统一墙路径（唯一）：scene.walls 已由 parse 缝合（房间边+双线条带），
+    # 全高 + 门窗开洞 + 窗棂
+    walls_poly: list[Polygon] = [Polygon(w.polygon) for w in scene.walls
+                                 if len(w.polygon) >= 4]
     door_by_wall: dict[str, list] = {}
     win_by_wall: dict[str, list] = {}
     for d in scene.doors:
@@ -212,19 +286,46 @@ def build_plan(scene: SceneJSON, output_dir: str) -> BuildPlan:
         win_by_wall.setdefault(w.wall_id or "", []).append(w)
     for wall in scene.walls:
         base = wall_box(wall, fh)
+        # 端部延伸半个墙厚：保证 L/T 交角处墙盒搭接，消除接缝黑缝（光照死角）
+        base = base._replace(size=(base.size[0] + base.size[1], base.size[1], base.size[2]))
         openings = []
         for d in door_by_wall.get(wall.id, []):
             openings.append(project_opening(base, d.position, d.width, 0.0, d.height))
-        for w in win_by_wall.get(wall.id, []):
+        wins = win_by_wall.get(wall.id, [])
+        for w in wins:
             openings.append(project_opening(base, w.position, w.width,
                                             w.sill_height, w.sill_height + w.height))
         for seg in segment_wall(base, openings):
             boxes.append(PlanBox(center=list(seg.center), size=list(seg.size),
                                  rot_z=seg.rot_z, kind="wall"))
+        for w in wins:
+            op = project_opening(base, w.position, w.width,
+                                 w.sill_height, w.sill_height + w.height)
+            # 玻璃面板填满窗洞：避免俯视看进洞内过梁底面的无光黑腔（对齐基准图窗棂形态）
+            glass = _local_box(base, op.u, op.width - 40.0, op.z_bot + 20.0, op.z_top - 20.0)
+            boxes.append(PlanBox(center=list(glass.center),
+                                 size=[glass.size[0], 10.0, glass.size[2]],
+                                 rot_z=glass.rot_z, kind="frame", label="glass"))
+            for fr in window_frames(base, op):
+                boxes.append(PlanBox(center=list(fr.center), size=list(fr.size),
+                                     rot_z=fr.rot_z, kind="frame"))
+
     for f in scene.furniture:
         sx, sy, sz = f.size
+        rot = f.rotation
+        if f.type in ("bed", "sofa") and walls_poly:
+            # 床头/沙发背贴最近墙：比较家具两端到最近墙面的距离，远端翻转 180°
+            L = sy / 2.0
+            c, s = math.cos(rot), math.sin(rot)
+            pt_m = Point(f.position[0] + L * s, f.position[1] - L * c)   # local -y 端（床头/靠背）
+            pt_p = Point(f.position[0] - L * s, f.position[1] + L * c)   # local +y 端
+            dm = min(pg.distance(pt_m) for pg in walls_poly)
+            dp = min(pg.distance(pt_p) for pg in walls_poly)
+            if dp < dm:
+                rot += math.pi
         boxes.append(PlanBox(center=[f.position[0], f.position[1], sz / 2.0],
-                             size=[sx, sy, sz], rot_z=f.rotation, kind="furniture"))
+                             size=[sx, sy, sz], rot_z=rot, kind="furniture",
+                             label=f.type))
     aabbs = [_aabb(b) for b in boxes]
     minx = min(a[0] for a in aabbs) if aabbs else 0.0
     maxx = max(a[1] for a in aabbs) if aabbs else 0.0
@@ -234,6 +335,11 @@ def build_plan(scene: SceneJSON, output_dir: str) -> BuildPlan:
                     size=[(maxx - minx) + 1000.0, (maxy - miny) + 1000.0, 100.0],
                     kind="floor")
     boxes.append(floor)
-    cameras = [PlanCamera(view_id=p.view_id, position=list(p.position),
-                          target=list(p.target)) for p in plan_views(scene)]
+    cameras = []
+    for p in plan_views(scene):
+        ortho = p.view_id == "view_iso"
+        scale = max(maxx - minx, maxy - miny) * 1.15 if ortho else 0.0
+        cameras.append(PlanCamera(view_id=p.view_id, position=list(p.position),
+                                  target=list(p.target), ortho=ortho,
+                                  ortho_scale=scale))
     return BuildPlan(floor_height=fh, boxes=boxes, cameras=cameras, output_dir=output_dir)

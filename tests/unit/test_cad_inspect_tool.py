@@ -43,3 +43,19 @@ def test_inspect_text_position_falls_back_to_insert(tmp_path: Path):
     report = inspect_dxf(p)
     note = next(n for n in report.text_annotations if n.content == "客厅")
     assert note.position == [1500.0, 2500.0]
+
+
+def test_inspect_detects_room_layer_candidates(tmp_path: Path):
+    # P-完成面 是精装图的房间边界图层——须进 room_layer_candidates，不得进 wall_layer_candidates
+    doc = ezdxf.new("R2018")
+    doc.layers.add("P-完成面")
+    msp = doc.modelspace()
+    for _ in range(3):
+        msp.add_lwpolyline([(0, 0), (4000, 0), (4000, 3000)],
+                           dxfattribs={"layer": "P-完成面"}, close=True)
+    p = tmp_path / "finished.dxf"
+    doc.saveas(p)
+    report = inspect_dxf(p)
+    assert "P-完成面" in report.room_layer_candidates
+    assert "P-完成面" not in report.wall_layer_candidates
+

@@ -10,6 +10,7 @@ TOOL_VERSIONS: dict[str, str] = {
     "inspect_dxf": "1",
     "parse_scene": "1",
     "build_white_model": "1",
+    "fidelity_check": "1",
 }
 
 

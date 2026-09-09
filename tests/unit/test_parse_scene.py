@@ -93,3 +93,27 @@ def test_parse_classifies_door_via_chinese_layer(tmp_path: Path):
     assert scene is not None
     assert len(scene.doors) == 1                   # 经图层"门"字识别
     assert scene.furniture == []
+
+
+def test_parse_rooms_from_finished_surface_layer(tmp_path: Path):
+    # 精装图（平面系统图）：P-完成面 图层用封闭 LWPOLYLINE 勾勒各空间边界
+    # 没有传统双线墙，polygonize 路径①无结果；路径②须从 room_layer_candidates 取轮廓
+    doc = ezdxf.new("R2018")
+    doc.layers.add("P-完成面")
+    msp = doc.modelspace()
+    # 两个相邻房间（各 4×3m，共用一面墙）
+    msp.add_lwpolyline(
+        [(0, 0), (4000, 0), (4000, 3000), (0, 3000)],
+        dxfattribs={"layer": "P-完成面"}, close=True,
+    )
+    msp.add_lwpolyline(
+        [(4000, 0), (8000, 0), (8000, 3000), (4000, 3000)],
+        dxfattribs={"layer": "P-完成面"}, close=True,
+    )
+    p = tmp_path / "finished.dxf"
+    doc.saveas(p)
+    result = parse_scene(p)
+    assert result.ok
+    scene = result.data
+    assert scene is not None
+    assert len(scene.rooms) == 2, f"expected 2 rooms, got {len(scene.rooms)}"
