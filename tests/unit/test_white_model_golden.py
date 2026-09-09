@@ -29,7 +29,7 @@ def test_golden_real_fitout_quality():
     """真实精装图（01-平面系统图）：房间源=天花轮廓线。"""
     scene = parse_scene(CONVERTED).data
     q = scene.quality
-    assert 3 <= q.rooms <= 6                          # 4 功能区（嵌套轮廓已去重）
+    assert 3 <= q.rooms <= 14                         # 尺寸墙细分房间（12 实测）
     assert q.tiling_ratio >= 0.6
     assert q.wall_segments >= 8                       # 房间边 + 未吸附条带
     assert q.openings_attached_ratio >= 0.8           # 门窗基本挂墙

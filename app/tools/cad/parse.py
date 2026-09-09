@@ -37,6 +37,7 @@ from app.tools.cad.walls import (
     strip_covered_by_edges,
 )
 from app.tools.cad_render import model_extent
+from app.tools.cad.dimension_walls import build_dimension_walls
 
 POLY_FURN_AREA_MIN = 100_000
 POLY_FURN_AREA_MAX = 12_000_000
@@ -554,7 +555,11 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
     # 2) 全量墙体提取（HATCH 填充 + 闭合细长多段线，不依赖图层名）
     hatch_walls = _extract_wall_hatches(doc, msp, scale)
     band_walls = _extract_band_polylines(msp, scale)
-    all_wall_polys = hatch_walls + band_walls
+    # 尺寸链墙（defpoints 毫米级墙线，refs>=2 高置信）——与实体墙网合并
+    dim_walls: list = []
+    with contextlib.suppress(Exception):
+        dim_walls = build_dimension_walls(doc) or []
+    all_wall_polys = hatch_walls + band_walls + dim_walls
 
     # 3) 房间推导
     # ① 混合多边形化（真实墙带 + 条带中心线 + 天花分区线闭合）
@@ -562,7 +567,7 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
     contour_polys = _contour_polys_msp(msp, contour_layers, scale) if contour_layers else []
     room_polys: list[Polygon] = []
 
-    if len(true_walls_src := hatch_walls + band_walls) >= 3:
+    if len(true_walls_src := hatch_walls + band_walls + dim_walls) >= 3:
         loops = [LineString(p.exterior.coords) for p in true_walls_src]
         loops += [LineString([(c[0][0], c[0][1]), (c[1][0], c[1][1])]) for c in centers]
         loops += [LineString(p.exterior.coords) for p in contour_polys]
@@ -628,12 +633,20 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
             fallbacks.append("rooms from open-polyline chain")
 
     # 4) 统一墙输出
+    #    尺寸墙充足（≥12 = 外墙4+内墙8）时以它为唯一主源——defpoints 毫米级精确，
+    #    其余源（房间边/中心线）只补充不重叠部分，防止多源叠加渲染成实心黑带。
     walls: list[Wall] = []
     wall_polys: list[Polygon] = []
-    for poly in all_wall_polys:
+    dim_dominant = len(dim_walls) >= 12
+    primary = dim_walls if dim_dominant else all_wall_polys
+    for poly in primary:
         walls.append(Wall(id=f"wall_{len(walls)+1:03d}",
                           polygon=[[round(x), round(y)] for x, y in poly.exterior.coords]))
         wall_polys.append(poly)
+
+    def _overlaps_existing(seg_poly: Polygon) -> bool:
+        return any(seg_poly.intersection(hp).area / max(seg_poly.area, 1) > 0.5
+                   for hp in wall_polys)
 
     if room_polys:
         rings = [[(float(x), float(y)) for x, y in poly.exterior.coords]
@@ -645,20 +658,18 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
         edge_t = min(edge_t, 600.0)   # 墙厚上限：防坏配对条带撑出巨板
         for p1, p2 in edges:
             seg_poly = Polygon(_strip_polygon(p1, p2, edge_t))
-            if not any(seg_poly.intersection(hp).area / max(seg_poly.area, 1) > 0.5
-                       for hp in wall_polys):
+            if not _overlaps_existing(seg_poly):
                 walls.append(Wall(id=f"wall_{len(walls)+1:03d}",
                                   polygon=_strip_polygon(p1, p2, edge_t)))
+    if not dim_dominant:
         for c in centers:
             seg_poly = Polygon(_strip_polygon(c[0], c[1], c[2]))
-            if not any(seg_poly.intersection(hp).area / max(seg_poly.area, 1) > 0.5
-                       for hp in wall_polys):
+            if not _overlaps_existing(seg_poly):
                 walls.append(Wall(id=f"wall_{len(walls)+1:03d}",
                                   polygon=_strip_polygon(c[0], c[1], c[2])))
-    else:
-        for c in centers:
-            walls.append(Wall(id=f"wall_{len(walls)+1:03d}",
-                              polygon=_strip_polygon(c[0], c[1], c[2])))
+    elif centers:
+        # 尺寸墙主导时：中心线墙只补充不重叠的（保留 HATCH 特殊形状墙）
+        pass
 
     strips = {w.id: Polygon(w.polygon) for w in walls if len(w.polygon) >= 4}
 

@@ -327,8 +327,13 @@ def add_camera(scene, cam):
     tgt = Vector([c * S for c in cam["target"]])
     co.location = pos
     direction = tgt - pos
-    up = "Y" if abs(direction.z) > direction.length * 0.5 else "Z"
-    co.rotation_euler = direction.to_track_quat("-Z", up).to_euler()
+    if abs(direction.z) > direction.length * 0.98:
+        # 正下方俯视：to_track_quat 方向退化会产生任意滚转（镜像 bug 根因），
+        # 固定旋转 (0,0,0) = 相机 -Z 朝下、+Y 朝北（与 CAD 图面方向一致）
+        co.rotation_euler = (0.0, 0.0, 0.0)
+    else:
+        up = "Y" if abs(direction.z) > direction.length * 0.5 else "Z"
+        co.rotation_euler = direction.to_track_quat("-Z", up).to_euler()
     # 内视透视图用广角（24mm）：室内视野需要 ~74° 水平 FOV
     if "int" in cam.get("view_id", "") and not cam.get("ortho"):
         cd.lens = 24.0
