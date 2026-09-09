@@ -222,6 +222,38 @@ def _furniture_kit(b, idx: int, mats: dict):
 def add_boxes(boxes):
     hide = set(filter(None, os.environ.get("ARP_HIDE", "").split(",")))
     em = EMISSIVE["on"]
+    # ARP_SEMANTIC_COLORS=1：语义高对比配色（校验专用）——
+    # 地板纯白/墙纯黑/每类家具独立饱和色，像素级确定性判别+VLM 识别都受益
+    if os.environ.get('ARP_SEMANTIC_COLORS'):
+        mat_wall = _mat('sv_wall', (0.0, 0.0, 0.0), emissive=True)
+        mat_floor = _mat('sv_floor', (1.0, 1.0, 1.0), emissive=True)
+        mats = {
+            'default': _mat('sv_furn', (1.0, 0.0, 1.0), emissive=True),   # 品红
+            'bed': _mat('sv_bed', (1.0, 0.0, 0.0), emissive=True),         # 红
+            'sanitary': _mat('sv_san', (0.0, 1.0, 0.0), emissive=True),    # 绿
+            'wood': _mat('sv_wood', (0.0, 0.0, 1.0), emissive=True),       # 蓝
+            'upholstery': _mat('sv_uph', (1.0, 1.0, 0.0), emissive=True),  # 黄
+        }
+        for i, b in enumerate(boxes):
+            if b['kind'] == 'furniture':
+                _furniture_kit(b, i, mats)
+                continue
+            bpy.ops.mesh.primitive_cube_add(size=1.0)
+            o = bpy.context.active_object
+            o.name = f"{b['kind']}_{i:03d}"
+            sx = max(abs(b['size'][0]) * S, 1e-4)
+            sy = max(abs(b['size'][1]) * S, 1e-4)
+            sz = max(abs(b['size'][2]) * S, 1e-4)
+            o.dimensions = (sx, sy, sz)
+            bpy.ops.object.transform_apply(scale=True)
+            o.location = (b['center'][0]*S, b['center'][1]*S, b['center'][2]*S)
+            o.rotation_euler[2] = b.get('rot_z', 0.0)
+            m = mat_wall if b['kind'] == 'wall' else mat_floor
+            o.data.materials.clear()
+            o.data.materials.append(m)
+            _bevel(o)
+        return
+
     # 制图惯例配色：墙深灰、地面浅、家具中灰（对齐 Image#8 阅读习惯）
     mat_wall = _mat("mat_wall", (0.30, 0.30, 0.30), roughness=0.7, emissive=em)
     mat_furn = _mat("mat_furn", (0.85, 0.80, 0.72), roughness=0.5, emissive=em)  # 木质暖色

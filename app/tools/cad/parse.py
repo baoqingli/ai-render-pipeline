@@ -642,6 +642,7 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
         edge_t = statistics.median(
             [c[2] for c in centers if strip_covered_by_edges((c[0], c[1]), c[2], edges)]
         ) if centers else 200.0
+        edge_t = min(edge_t, 600.0)   # 墙厚上限：防坏配对条带撑出巨板
         for p1, p2 in edges:
             seg_poly = Polygon(_strip_polygon(p1, p2, edge_t))
             if not any(seg_poly.intersection(hp).area / max(seg_poly.area, 1) > 0.5

@@ -77,7 +77,7 @@ def _scene_context_table(scene_json_path: str) -> str:
     def pct(x, y):
         return f"({(x - x0) / W:.2f},{(y - y0) / H:.2f})"
 
-    lines = [f"场景实体清单（图面占比坐标，左上原点，与图2渲染同源）：",
+    lines = ["场景实体清单（图面占比坐标，左上原点，与图2渲染同源）：",
              f"墙 {len(sc.get('walls', []))} 段 / 门 {len(sc.get('doors', []))} / "
              f"窗 {len(sc.get('windows', []))} / 家具 {len(sc.get('furniture', []))}："]
     for f in sc.get("furniture", []):
@@ -118,10 +118,11 @@ def validate_render(cad_png: str, render_png: str, *,
     task = ("图1 = CAD 平面布置图（真值），图2 = 自动生成的白模俯视图。"
             "请逐项对比并输出差异 JSON。关注：幻影墙/缺失墙/走廊连通性/家具位置/门洞。")
     if scene_ctx:
-        task += ("\n\n注意：图2 的家具是简化几何体（床=白色矩形+枕头凸起，"
-                 "柜=棕色块，洁具=白色）。判定家具是否缺失时，请按下方场景清单的"
-                 "类型和坐标（图面占比）到图2对应位置核对是否存在几何体，"
-                 "不要仅凭外形是否像真实家具判断。\n\n" + scene_ctx)
+        task += ("\n\n图2 为语义配色校验渲染：墙=黑色、地板=白色、家具按类别着色"
+                 "（床=红、洁具=绿、柜=蓝、椅=黄、桌/电视=品红）。"
+                 "这是有意设计，不要把配色本身当差异。判定家具是否缺失时，"
+                 "按下方场景清单的类型和坐标（图面占比）到图2对应位置核对"
+                 "是否存在对应颜色块，不要凭外形是否像真实家具判断。\n\n" + scene_ctx)
     content.append({"type": "text", "text": task})
 
     messages = [SystemMessage(content=VALIDATION_SYSTEM),
