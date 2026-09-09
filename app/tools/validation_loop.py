@@ -60,11 +60,48 @@ def _extract_json(text: str) -> dict:
     return obj
 
 
+def _scene_context_table(scene_json_path: str) -> str:
+    """SceneJSON → 结构化清单表（供校验 Agent 按位置核对，不靠外形猜）。"""
+    import json as _json
+    from pathlib import Path as _Path
+    p = _Path(scene_json_path)
+    if not p.exists():
+        return "（无场景数据）"
+    sc = _json.loads(p.read_text(encoding="utf-8"))
+    xs = [pt[0] for w in sc.get("walls", []) for pt in w["polygon"]]
+    ys = [pt[1] for w in sc.get("walls", []) for pt in w["polygon"]]
+    x0, y0 = (min(xs), min(ys)) if xs else (0, 0)
+    x1, y1 = (max(xs), max(ys)) if xs else (1, 0)
+    W, H = max(x1 - x0, 1), max(y1 - y0, 1)
+
+    def pct(x, y):
+        return f"({(x - x0) / W:.2f},{(y - y0) / H:.2f})"
+
+    lines = [f"场景实体清单（图面占比坐标，左上原点，与图2渲染同源）：",
+             f"墙 {len(sc.get('walls', []))} 段 / 门 {len(sc.get('doors', []))} / "
+             f"窗 {len(sc.get('windows', []))} / 家具 {len(sc.get('furniture', []))}："]
+    for f in sc.get("furniture", []):
+        px, py = f["position"]
+        w, d, h = f["size"]
+        lines.append(f"  {f['type']} @ {pct(px, py)} 尺寸{w:.0f}x{d:.0f}x{h:.0f}mm")
+    for i, d in enumerate(sc.get("doors", [])):
+        px, py = d["position"]
+        lines.append(f"  door{i} @ {pct(px, py)} 宽{d['width']:.0f}mm")
+    return "\n".join(lines[:60])
+
+
 def validate_render(cad_png: str, render_png: str, *,
-                    model: str | None = None) -> ToolResult[ValidationResult]:
-    """VLM 对比 CAD 真值与白模渲染 → 结构化差异报告（含建议修正操作）。"""
+                    model: str | None = None,
+                    scene_json: str | None = None) -> ToolResult[ValidationResult]:
+    """VLM 对比 CAD 真值与白模渲染 → 结构化差异报告（含建议修正操作）。
+
+    scene_json：白模的场景数据（家具/门坐标清单）——注入后校验按位置核对，
+    消除"渲染了但因简化外形认不出"的假阴性。
+    """
     s = get_settings()
     use_model = model or s.vision_model or s.llm_model
+
+    scene_ctx = _scene_context_table(scene_json) if scene_json else ""
 
     client = make_chat_model(s.model_copy(update={"llm_model": use_model}), temperature=0.0)
     content: list[dict] = []
@@ -78,9 +115,14 @@ def validate_render(cad_png: str, render_png: str, *,
             content.append({"type": "image_url",
                             "image_url": {"url": f"data:image/png;base64,{_b64(png)}"}})
         content.append({"type": "text", "text": f"↑ {label}"})
-    content.append({"type": "text", "text":
-        "图1 = CAD 平面布置图（真值），图2 = 自动生成的白模俯视图。"
-        "请逐项对比并输出差异 JSON。关注：幻影墙/缺失墙/走廊连通性/家具位置/门洞。"})
+    task = ("图1 = CAD 平面布置图（真值），图2 = 自动生成的白模俯视图。"
+            "请逐项对比并输出差异 JSON。关注：幻影墙/缺失墙/走廊连通性/家具位置/门洞。")
+    if scene_ctx:
+        task += ("\n\n注意：图2 的家具是简化几何体（床=白色矩形+枕头凸起，"
+                 "柜=棕色块，洁具=白色）。判定家具是否缺失时，请按下方场景清单的"
+                 "类型和坐标（图面占比）到图2对应位置核对是否存在几何体，"
+                 "不要仅凭外形是否像真实家具判断。\n\n" + scene_ctx)
+    content.append({"type": "text", "text": task})
 
     messages = [SystemMessage(content=VALIDATION_SYSTEM),
                 HumanMessage(content=content)]  # type: ignore[arg-type]
