@@ -29,14 +29,16 @@ class ValidationResult(BaseModel):
 
 
 VALIDATION_SYSTEM = (
-    "你是建筑图纸质量审查专家。给定两张图：\n"
-    "图1 = CAD 平面布置图（真值）\n"
-    "图2 = 自动生成的白模俯视图\n\n"
-    "逐项对比找出所有不一致。每个差异必须含 type/severity/description/location/action。"
-    "type: phantom_wall|missing_wall|wall_offset|missing_furniture|wrong_position|"
-    "corridor_split|missing_door|extra_element|other\n"
-    "action: 建议修正操作（如'删除走廊多余隔墙'）\n"
-    "只输出严格 JSON。"
+    "你是建筑图纸质量审查专家。给定两张图："
+    "图1 = CAD 平面布置图（真值），图2 = 自动生成的白模俯视图。"
+    "逐项对比找出所有不一致。"
+    "只输出如下格式的 JSON（不要 markdown 代码块，不要多余文字）：\n"
+    '{"score": <0-100 整数>, "summary": "<一句话>", '
+    '"issues": [{"kind": "missing_wall|phantom_wall|wall_offset|'
+    'missing_furniture|wrong_position|corridor_split|missing_door|'
+    'extra_element|other", "severity": "high|medium|low", '
+    '"description": "<差异>", "location": "<方位>", '
+    '"action": "<修正建议>"}]}'
 )
 
 
@@ -50,10 +52,12 @@ def _extract_json(text: str) -> dict:
         t = t.strip("`")
         if t.startswith("json"):
             t = t[4:]
-    start, end = t.find("{"), t.rfind("}")
-    if start < 0 or end <= start:
+    start = t.find("{")
+    if start < 0:
         raise ValueError("no json object")
-    return json.loads(t[start:end + 1])
+    # raw_decode 解析首个完整 JSON 值，忽略尾随内容（VLM 常在 JSON 后追加说明）
+    obj, _ = json.JSONDecoder().raw_decode(t[start:])
+    return obj
 
 
 def validate_render(cad_png: str, render_png: str, *,
@@ -84,20 +88,37 @@ def validate_render(cad_png: str, render_png: str, *,
     async def _go():
         return await client.ainvoke(messages)
 
-    try:
-        resp = asyncio.run(_go())
-    except Exception as e:  # noqa: BLE001
-        return ToolResult(ok=False, error=ToolError(
-            code="VALIDATION_LLM_ERROR", message=str(e)[:300], retryable=True))
-
-    raw = resp.content if isinstance(resp.content, str) else \
-        "".join(b.get("text", "") for b in resp.content if isinstance(b, dict))
+    raw = ""
+    for _attempt in range(3):                     # VLM 输出漂移 → 退化检测重试
+        try:
+            resp = asyncio.run(_go())
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(ok=False, error=ToolError(
+                code="VALIDATION_LLM_ERROR", message=str(e)[:300], retryable=True))
+        raw = resp.content if isinstance(resp.content, str) else \
+            "".join(b.get("text", "") for b in resp.content
+                    if isinstance(b, dict))
+        try:
+            data = _extract_json(raw)
+            if bool(data.get("issues") or data.get("differences")
+                   or data.get("diffs")) or isinstance(data.get("score"), int):
+                break                              # 有效输出，停止重试
+        except (ValueError, json.JSONDecodeError):
+            continue
     try:
         data = _extract_json(raw)
+        # VLM 键名容错：issues/differences/diffs 均接受；score 缺失时按严重度推导
+        raw_issues = (data.get("issues") or data.get("differences")
+                      or data.get("diffs") or [])
+        issues = [ValidationIssue(**i) for i in raw_issues
+                  if isinstance(i, dict)]
+        score = data.get("score")
+        if not isinstance(score, int):
+            penalty = sum({"high": 15, "medium": 5, "low": 2}.get(i.severity, 5)
+                          for i in issues)
+            score = max(0, 100 - penalty)
         result = ValidationResult(
-            score=data.get("score", 0),
-            summary=data.get("summary", ""),
-            issues=[ValidationIssue(**i) for i in data.get("issues", [])])
+            score=score, summary=data.get("summary", ""), issues=issues)
     except (ValueError, KeyError, json.JSONDecodeError) as e:
         return ToolResult(ok=False, error=ToolError(
             code="VALIDATION_PARSE_FAILED", message=str(e)[:200]))
