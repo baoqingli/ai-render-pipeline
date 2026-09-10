@@ -198,8 +198,9 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
     elements = []
     # 墙碎片合并：多边形 → 中心线段 → snap+共线合并 → 外接矩形
     # （验证 Agent 实测：不合并时 71 条中 52 条 <800mm，约为实际 2 倍）
-    from app.tools.cad.walls import merge_collinear, snap_endpoints
     from shapely.geometry import Polygon as _Poly
+
+    from app.tools.cad.walls import merge_collinear, snap_endpoints
 
     def _centerline(poly_pts):
         """墙多边形 → MRR 中心线段（(p1, p2)）。"""
@@ -224,16 +225,16 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
     merged_edges = merge_collinear(snap_endpoints(wall_segs))         if wall_segs else []
     n_walls = len(merged_edges)
     for p1, p2 in merged_edges:
-        b = [round(min(p1[0], p2[0])), round(min(p1[1], p2[1])),
-             round(max(p1[0], p2[0])), round(max(p1[1], p2[1]))]
+        b = [float(min(p1[0], p2[0])), float(min(p1[1], p2[1])),
+             float(max(p1[0], p2[0])), float(max(p1[1], p2[1]))]
         elements.append(TileElement(category="墙", item="wall", count=1,
                                     bbox_pct=pct(b), confidence=0.9,
                                     tile=1, world_bbox=b))
     # 房间 IoU 去重（VLM 分区矩形+细分可能产生重叠冗余）
-    seen_rooms: list[tuple] = []
+    seen_rooms: list[tuple[float, float, float, float]] = []
     n_rooms = 0
     for r in sorted(sc.rooms, key=lambda r: -_Poly(r.polygon).area):
-        b = wb(r.polygon)
+        b = [float(v) for v in wb(r.polygon)]
         dup = False
         for sb in seen_rooms:
             ix0, iy0 = max(b[0], sb[0]), max(b[1], sb[1])
@@ -245,7 +246,7 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
                 break
         if dup:
             continue
-        seen_rooms.append(b)
+        seen_rooms.append((float(b[0]), float(b[1]), float(b[2]), float(b[3])))
         n_rooms += 1
         raw_name = r.name or "room"
         name = raw_name.replace("\\P", " ").split("\n")[0][:20] or "room"

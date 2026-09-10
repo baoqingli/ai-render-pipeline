@@ -211,7 +211,8 @@ def _registry_summary(registry: ElementRegistry) -> str:
     # 墙的尺寸分布（碎片化检测线索）
     walls = [e for e in registry.elements if e.category == "墙" and e.world_bbox]
     if walls:
-        lens = sorted((e.world_bbox[2] - e.world_bbox[0]) for e in walls)
+        lens = sorted((wb[2] - wb[0]) for wb in
+                      (e.world_bbox for e in walls if e.world_bbox))
         short = sum(1 for L in lens if L < 800)
         lines.append(f"  墙长分布: 最短{lens[0]:.0f}mm / 中位{lens[len(lens)//2]:.0f}mm / "
                      f"最长{lens[-1]:.0f}mm；<800mm 短段 {short} 条")
@@ -227,7 +228,9 @@ def validate_registry(registry: ElementRegistry, standard_png: str, *,
     """
     import asyncio
     import base64
+
     from langchain_core.messages import HumanMessage, SystemMessage
+
     from app.core.config import get_settings
     from app.infra.llm import make_chat_model
 
@@ -269,10 +272,12 @@ def validate_registry(registry: ElementRegistry, standard_png: str, *,
 
 def registry_health(registry: ElementRegistry) -> dict:
     """确定性健康检查（无需 VLM）：碎片化/异常值检测。"""
-    walls = [e for e in registry.elements if e.category == "墙" and e.world_bbox]
+    walls = [e for e in registry.elements
+             if e.category == "墙" and e.world_bbox]
     issues = []
     if walls:
-        lens = sorted((e.world_bbox[2] - e.world_bbox[0]) for e in walls)
+        lens = sorted((wb[2] - wb[0]) for wb in
+                      (e.world_bbox for e in walls if e.world_bbox))
         short = sum(1 for L in lens if L < 800)
         if short > len(walls) * 0.4:
             issues.append({"kind": "fragmentation",
