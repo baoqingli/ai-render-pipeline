@@ -22,6 +22,8 @@ dependencies = [
     "psycopg[binary]>=3.3.5",
     "valkey>=6.1.1",
     "langchain-anthropic>=1.7.1",
+    "torch>=2.4",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]
@@ -38,6 +40,9 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu121"
 
 [tool.ruff]
 line-length = 100

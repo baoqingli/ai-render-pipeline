@@ -11,3 +11,4 @@ e2e.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+third_party/
