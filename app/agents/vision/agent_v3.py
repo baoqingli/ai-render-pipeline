@@ -196,15 +196,61 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
                 round((bbox[2] - x0) / W, 3), round((bbox[3] - y0) / H, 3)]
 
     elements = []
-    for w in sc.walls:
-        b = wb(w.polygon)
+    # 墙碎片合并：多边形 → 中心线段 → snap+共线合并 → 外接矩形
+    # （验证 Agent 实测：不合并时 71 条中 52 条 <800mm，约为实际 2 倍）
+    from app.tools.cad.walls import merge_collinear, snap_endpoints
+    from shapely.geometry import Polygon as _Poly
+
+    def _centerline(poly_pts):
+        """墙多边形 → MRR 中心线段（(p1, p2)）。"""
+        mrr = _Poly(poly_pts).minimum_rotated_rectangle
+        c = list(mrr.exterior.coords)
+        (ax, ay), (bx, by) = c[0], c[1]
+        (dx_, dy_) = c[3], c[2]
+        la = math.hypot(bx - ax, by - ay)
+        lb = math.hypot(dx_[0] - ax, dx_[1] - ay)
+        if la >= lb:   # 长边方向为中心线
+            p1 = ((ax + c[3][0]) / 2, (ay + c[3][1]) / 2)
+            p2 = ((bx + c[2][0]) / 2, (by + c[2][1]) / 2)
+        else:
+            p1 = ((ax + bx) / 2, (ay + by) / 2)
+            p2 = ((c[3][0] + dx_[0]) / 2, (c[3][1] + dx_[1]) / 2)
+        return p1, p2
+
+    wall_segs = [_centerline(w.polygon) for w in sc.walls
+                 if len(w.polygon) >= 4]
+    wall_segs = [(p1, p2) for p1, p2 in wall_segs
+                 if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 50]
+    merged_edges = merge_collinear(snap_endpoints(wall_segs))         if wall_segs else []
+    n_walls = len(merged_edges)
+    for p1, p2 in merged_edges:
+        b = [round(min(p1[0], p2[0])), round(min(p1[1], p2[1])),
+             round(max(p1[0], p2[0])), round(max(p1[1], p2[1]))]
         elements.append(TileElement(category="墙", item="wall", count=1,
                                     bbox_pct=pct(b), confidence=0.9,
                                     tile=1, world_bbox=b))
-    for r in sc.rooms:
+    # 房间 IoU 去重（VLM 分区矩形+细分可能产生重叠冗余）
+    seen_rooms: list[tuple] = []
+    n_rooms = 0
+    for r in sorted(sc.rooms, key=lambda r: -_Poly(r.polygon).area):
         b = wb(r.polygon)
-        elements.append(TileElement(category="房间边界", item=r.name or "room",
-                                    count=1, bbox_pct=pct(b), confidence=0.85,
+        dup = False
+        for sb in seen_rooms:
+            ix0, iy0 = max(b[0], sb[0]), max(b[1], sb[1])
+            ix1, iy1 = min(b[2], sb[2]), min(b[3], sb[3])
+            inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+            smaller = min((b[2]-b[0])*(b[3]-b[1]), (sb[2]-sb[0])*(sb[3]-sb[1]))
+            if smaller > 0 and inter / smaller > 0.5:
+                dup = True
+                break
+        if dup:
+            continue
+        seen_rooms.append(b)
+        n_rooms += 1
+        raw_name = r.name or "room"
+        name = raw_name.replace("\\P", " ").split("\n")[0][:20] or "room"
+        elements.append(TileElement(category="房间边界", item=name, count=1,
+                                    bbox_pct=pct(b), confidence=0.85,
                                     tile=1, world_bbox=b))
     for d in sc.doors:
         elements.append(TileElement(category="门", item="door", count=1,
@@ -228,8 +274,8 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
         tiles=[TileReport(tile=1, drawing_type="furniture_layout",
                           elements=elements)],
         best_plan_view=source,
-        cross_notes=f"矢量路径：{len(sc.walls)} 墙 / {len(sc.rooms)} 房间 / "
-                    f"{len(sc.doors)} 门 / {len(sc.windows)} 窗 / "
+        cross_notes=f"矢量路径：墙合并后 {n_walls} 段（原始 {len(sc.walls)}）/"
+                    f" 房间 {n_rooms} / {len(sc.doors)} 门 / {len(sc.windows)} 窗 / "
                     f"{len(sc.furniture)} 家具（mm 坐标）")
 
 

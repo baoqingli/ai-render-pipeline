@@ -182,3 +182,108 @@ def tri_validate(registry: ElementRegistry, render_png: str,
             })
     result["issues"] = issues
     return result
+
+
+# ── Registry × 标准图（CAD 真值）验证——识图 Agent 输出的第一道门禁 ────────────
+
+_REGISTRY_CHECK_SYSTEM = (
+    "你是建筑图纸审查专家。给定一张 CAD 平面布置图（真值）和一个由识图 Agent "
+    "输出的结构化元素清单（JSON 摘要）。请逐类别核对清单与图的实际内容，"
+    "找出清单中的错误（多报/少报/明显异常值）。"
+    '只输出 JSON：{"verdict": "<一句话>", '
+    '"category_checks": [{"category": "墙|房间|门|窗|家具", '
+    '"listed": <清单数>, "visible_estimate": <图中目测数>, '
+    '"verdict": "ok|over|under", "note": "<说明>"}], '
+    '"issues": [{"kind": "over_count|under_count|fragmentation|other", '
+    '"description": "<描述>", "severity": "high|medium|low", '
+    '"action": "<修正建议>"}]}'
+)
+
+
+def _registry_summary(registry: ElementRegistry) -> str:
+    from collections import Counter
+    by_cat = Counter(e.category for e in registry.elements)
+    lines = [f"元素总计 {len(registry.elements)}，按类别："]
+    for cat, n in by_cat.most_common():
+        items = Counter(e.item for e in registry.elements if e.category == cat)
+        detail = ", ".join(f"{k}×{v}" for k, v in items.most_common(8))
+        lines.append(f"  {cat}: {n}（{detail}）")
+    # 墙的尺寸分布（碎片化检测线索）
+    walls = [e for e in registry.elements if e.category == "墙" and e.world_bbox]
+    if walls:
+        lens = sorted((e.world_bbox[2] - e.world_bbox[0]) for e in walls)
+        short = sum(1 for L in lens if L < 800)
+        lines.append(f"  墙长分布: 最短{lens[0]:.0f}mm / 中位{lens[len(lens)//2]:.0f}mm / "
+                     f"最长{lens[-1]:.0f}mm；<800mm 短段 {short} 条")
+    return chr(10).join(lines)
+
+
+def validate_registry(registry: ElementRegistry, standard_png: str, *,
+                      model: str | None = None) -> dict:
+    """识图 Agent 输出 × CAD 真值图 → 逐类别核对报告（第一道门禁）。
+
+    返回 {verdict, category_checks, issues}。VLM 概率性结果，
+    配合确定性摘要（墙长分布等）辅助判断。
+    """
+    import asyncio
+    import base64
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from app.core.config import get_settings
+    from app.infra.llm import make_chat_model
+
+    s = get_settings()
+    use_model = model or s.vision_model or s.llm_model
+    client = make_chat_model(s.model_copy(update={"llm_model": use_model}),
+                             temperature=0.0)
+    b64 = base64.b64encode(Path(standard_png).read_bytes()).decode()
+    content = [
+        {"type": "image",
+         "source": {"type": "base64", "media_type": "image/png", "data": b64}}
+        if "/api/anthropic" in s.llm_base_url else
+        {"type": "image_url",
+         "image_url": {"url": f"data:image/png;base64,{b64}"}},
+        {"type": "text", "text":
+            "图是 CAD 平面布置图真值。下方是识图 Agent 的元素清单摘要，"
+            "请逐类别核对并输出差异 JSON。\n\n" + _registry_summary(registry)},
+    ]
+    resp = asyncio.run(client.ainvoke([
+        SystemMessage(content=_REGISTRY_CHECK_SYSTEM),
+        HumanMessage(content=content)]))  # type: ignore[arg-type]
+    raw = resp.content if isinstance(resp.content, str) else         "".join(b.get("text", "") for b in resp.content if isinstance(b, dict))
+    t = raw.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        if t.startswith("json"):
+            t = t[4:]
+    import json as _json
+    start = t.find("{")
+    if start < 0:
+        return {"verdict": "解析失败", "category_checks": [], "issues": [],
+                "raw": raw[:200]}
+    try:
+        return _json.JSONDecoder().raw_decode(t[start:])[0]
+    except (ValueError, _json.JSONDecodeError):
+        return {"verdict": "解析失败", "category_checks": [], "issues": [],
+                "raw": raw[:200]}
+
+
+def registry_health(registry: ElementRegistry) -> dict:
+    """确定性健康检查（无需 VLM）：碎片化/异常值检测。"""
+    walls = [e for e in registry.elements if e.category == "墙" and e.world_bbox]
+    issues = []
+    if walls:
+        lens = sorted((e.world_bbox[2] - e.world_bbox[0]) for e in walls)
+        short = sum(1 for L in lens if L < 800)
+        if short > len(walls) * 0.4:
+            issues.append({"kind": "fragmentation",
+                           "severity": "high",
+                           "description": f"墙 {len(walls)} 条中 {short} 条 <800mm——"
+                                          f"疑似多源碎片未合并",
+                           "action": "墙段共线合并（merge_collinear）后再入 registry"})
+    rooms = [e for e in registry.elements if e.category == "房间边界"]
+    if len(rooms) > 10:
+        issues.append({"kind": "over_count", "severity": "medium",
+                       "description": f"房间 {len(rooms)} 个超过典型套房 6-9 分区",
+                       "action": "房间去重/IoU 合并"})
+    return {"wall_count": len(walls), "room_count": len(rooms),
+            "issues": issues}
