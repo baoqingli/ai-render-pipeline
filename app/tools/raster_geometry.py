@@ -108,7 +108,7 @@ def connected_components(mask: list[list[bool]],
                                 stack.append((yy, xx))
                 if area >= min_area:
                     comps.append({"bbox": (x0, y0, x1, y1), "area": area})
-    comps.sort(key=lambda c: -c["area"])
+    comps.sort(key=lambda c: -int(c["area"]))
     return comps
 
 
