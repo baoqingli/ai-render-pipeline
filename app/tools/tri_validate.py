@@ -296,12 +296,21 @@ def registry_health(registry: ElementRegistry) -> dict:
 
 def check_elements_anchored(registry: ElementRegistry, standard_png: str,
                            min_ink_ratio: float = 0.04) -> dict:
-    """逐元素锚定验证（确定性）：元素 bbox_pct 区域在标准图上须有图墨。
+    """逐元素锚定验证（确定性，类别感知几何）：
 
-    空白区元素 = 幻影（提取器虚构）。ink = 非近白像素占比。
-    返回 {items: [{item, ink_ratio, anchored}], summary}。
+    - 门/窗：点位置 → 按 900/1500mm 等效宽扩成盒子再采样（退化 bbox 必 miss）
+    - 墙：细线 → 阈值降至 0.015（面积 ink 天然低）
+    - 房间边界：房间内部本来空 → 采样 bbox 周边带（边界应有墙线墨迹）
+    - 家具等：面积 ink >= min_ink_ratio
     """
     w, h, bpp, pix = decode_png(standard_png)
+    # 图幅对应的场景尺度（mm/px）：用 registry bbox 全幅估算
+    boxes = [e.world_bbox for e in registry.elements if e.world_bbox]
+    if boxes:
+        scene_w = max(b[2] for b in boxes) - min(b[0] for b in boxes)
+        mm_per_px = scene_w / max(w, 1) if registry.coordinate_frame is None             or registry.coordinate_frame.unit == "mm" else 1.0
+    else:
+        mm_per_px = 10.0
     items = []
     for e in registry.elements:
         if not e.bbox_pct or len(e.bbox_pct) != 4:
@@ -310,14 +319,46 @@ def check_elements_anchored(registry: ElementRegistry, standard_png: str,
         y0 = max(int(e.bbox_pct[1] * h), 0)
         x1 = min(int(e.bbox_pct[2] * w), w - 1)
         y1 = min(int(e.bbox_pct[3] * h), h - 1)
+        cat = e.category
+        if cat in ("门", "窗"):
+            # 点位置 → 扩成等效宽盒子（900/1500mm）
+            expand = int((450.0 if cat == "门" else 750.0) / max(mm_per_px, 1e-6))
+            cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+            x0, y0 = max(cx - expand, 0), max(cy - expand, 0)
+            x1, y1 = min(cx + expand, w - 1), min(cy + expand, h - 1)
+            thresh = 0.02
+        elif cat == "墙":
+            thresh = 0.015
+        elif cat == "房间边界":
+            # 周边带采样：边框 8% 宽度环带
+            bw = max((x1 - x0) // 12, 2)
+            bh = max((y1 - y0) // 12, 2)
+            x0e, y0e, x1e, y1e = x0, y0, x1, y1
+            x0, y0 = x0 + bw, y0 + bh          # 内缩后取环带 = 外框采样
+            # 采样四条边带
+            total = ink = 0
+            for y in range(y0e, y1e + 1, 2):
+                for x in range(x0e, x1e + 1, 2):
+                    on_ring = (y <= y0e + bh or y >= y1e - bh
+                              or x <= x0e + bw or x >= x1e - bw)
+                    if not on_ring:
+                        continue
+                    o = (y * w + x) * bpp
+                    total += 1
+                    if not all(v > 235 for v in (pix[o], pix[o+1], pix[o+2])):
+                        ink += 1
+            ratio = ink / max(total, 1)
+            items.append({"category": cat, "item": e.item,
+                          "ink_ratio": round(ratio, 3),
+                          "anchored": ratio >= 0.10})
+            continue
+        else:
+            thresh = min_ink_ratio
         if x1 <= x0 or y1 <= y0:
-            items.append({"category": e.category, "item": e.item,
+            items.append({"category": cat, "item": e.item,
                           "ink_ratio": 0.0, "anchored": False,
                           "note": "degenerate_bbox"})
             continue
-        # 窗口搜索：标准图坐标框与 registry 框有少量偏移（渲染 pad +
-        # 冻结视口差异 1~4%），细线元素单点采样必 miss → 以 bbox 为核心
-        # 在 ±3% 图幅邻域内取最大 ink（容忍帧偏移，仍能抓空白区幻影）
         win = int(0.03 * min(w, h))
         best_ratio = 0.0
         for oy in (0, -win, win):
@@ -335,9 +376,9 @@ def check_elements_anchored(registry: ElementRegistry, standard_png: str,
                         if not all(v > 235 for v in (pix[o], pix[o+1], pix[o+2])):
                             ink += 1
                 best_ratio = max(best_ratio, ink / max(total, 1))
-        items.append({"category": e.category, "item": e.item,
+        items.append({"category": cat, "item": e.item,
                       "ink_ratio": round(best_ratio, 3),
-                      "anchored": best_ratio >= min_ink_ratio})
+                      "anchored": best_ratio >= thresh})
     n_ok = sum(1 for i in items if i["anchored"])
     return {"items": items, "summary": {"total": len(items),
                                         "anchored": n_ok,
