@@ -586,9 +586,11 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
         if room_polys:
             fallbacks.append("rooms from ceiling/finish contours")
 
-    # ③ VLM 分区
-    if not room_polys and understanding is not None and understanding.zones:
+    # ③ VLM 分区：墙网房间数少于分区数时替换（VLM 功能分区即真实房间划分——
+    # 昨天 rooms=8/tiling=0.948 靠此路径；仅在墙网 0 房间时兜底会回归到 4）
+    if understanding is not None and understanding.zones:
         ext = model_extent(doc)
+        zx_polys: list[Polygon] = []
         for z in understanding.zones:
             p_ = z.bbox_pct
             if len(p_) != 4:
@@ -599,9 +601,13 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
             zy1 = ext[1] + p_[3] * (ext[3] - ext[1])
             rect = Polygon([(zx0, zy0), (zx1, zy0), (zx1, zy1), (zx0, zy1)])
             if 500_000.0 <= rect.area <= 1_000_000_000.0:
-                room_polys.append(rect)
-        if room_polys:
-            fallbacks.append("rooms from VLM zones")
+                zx_polys.append(rect)
+        if len(zx_polys) > len(room_polys):
+            room_polys = zx_polys
+            fallbacks.append(f"rooms from VLM zones ({len(zx_polys)})")
+        elif not room_polys and zx_polys:
+            room_polys = zx_polys
+            fallbacks.append(f"rooms from VLM zones fallback ({len(zx_polys)})")
 
     # ④ 中心线 polygonize
     if not room_polys and centers:

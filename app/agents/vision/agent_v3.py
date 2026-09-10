@@ -14,7 +14,8 @@ import math
 from pathlib import Path
 
 from app.models.tooling import Metrics, ToolError, ToolResult
-from app.models.vision import ElementRegistry, TileElement, TileReport
+from app.models.vision import (DrawingUnderstanding, ElementRegistry,
+                                TileElement, TileReport)
 
 # CubiCasa 图标类 → 登记簿类别
 _ICON_CAT = {
@@ -158,12 +159,48 @@ def analyze_image(png_path: str | Path, *, model: str | None = None,
 
 # ── 路径 A：DWG/DXF → ElementRegistry ────────────────────────────────────────
 
-def analyze_dwg(dxf_path: str | Path) -> ToolResult[ElementRegistry]:
-    """矢量路径：parse_scene（实体+HATCH+尺寸链）→ ElementRegistry。"""
+def analyze_dwg(dxf_path: str | Path, *,
+                use_vlm_understanding: bool = True) -> ToolResult[ElementRegistry]:
+    """矢量路径：parse_scene（实体+HATCH+尺寸链）→ ElementRegistry。
+
+    use_vlm_understanding：接入两个关键增强（2026-09-08 实证最优组合，
+    缺失即回归到裸解析——昨天 rooms=8/tiling=0.948 → 裸跑 rooms=4）：
+    ① VLM 解读书（understanding：语义路由图层+分区房间+家具扫荡）
+    ② 布置图视口对齐（frozen_layers：VP5 冻结图层，提取与布置图同源）
+    解读书优先读同目录缓存 drawing_understanding.json，无缓存则现场生成。
+    """
+    import contextlib as _cl
+
+    import ezdxf as _ezdxf
     from app.models.scene import SceneJSON
     from app.tools.cad.parse import parse_scene
 
-    r = parse_scene(str(dxf_path))
+    und = None
+    frozen = None
+    if use_vlm_understanding:
+        # ① VLM 解读书：缓存优先（标准产物目录；勿相对 dxf 拼——dxf 在
+        # fixtures/cad/_converted/ 下会拼出错位路径导致静默不加载）
+        _cands = [Path("experiments/data/model/p0_verify/drawing_understanding.json")]
+        und_path = next((p for p in _cands if p.exists()), _cands[0])
+        with _cl.suppress(Exception):
+            if und_path.exists():
+                und = DrawingUnderstanding.model_validate_json(
+                    und_path.read_text(encoding="utf-8"))
+        if und is None:
+            with _cl.suppress(Exception):
+                from app.agents.vision.agent import analyze_drawing
+                r0 = analyze_drawing(str(dxf_path))
+                if r0.ok and r0.data is not None:
+                    und = r0.data
+        # ② 布置图视口对齐
+        with _cl.suppress(Exception):
+            from app.tools.cad_sheets import pick_layout_view
+            doc = _ezdxf.readfile(str(dxf_path))
+            best, _ranked = pick_layout_view(doc)
+            if best is not None and best.frozen_layers:
+                frozen = best.frozen_layers
+
+    r = parse_scene(str(dxf_path), understanding=und, frozen_layers=frozen)
     if not r.ok or r.data is None:
         return ToolResult(ok=False, error=r.error or ToolError(
             code="PARSE_FAILED", message="parse_scene failed"))
@@ -241,8 +278,8 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
             ix1, iy1 = min(b[2], sb[2]), min(b[3], sb[3])
             inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
             smaller = min((b[2]-b[0])*(b[3]-b[1]), (sb[2]-sb[0])*(sb[3]-sb[1]))
-            if smaller > 0 and inter / smaller > 0.5:
-                dup = True
+            if smaller > 0 and inter / smaller > 0.85:
+                dup = True   # 仅去真正重复；VLM 分区矩形天然重叠（0.5 会误并合法分区）
                 break
         if dup:
             continue
