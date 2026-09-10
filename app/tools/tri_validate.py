@@ -211,7 +211,7 @@ def _registry_summary(registry: ElementRegistry) -> str:
     # 墙的尺寸分布（碎片化检测线索）
     walls = [e for e in registry.elements if e.category == "墙" and e.world_bbox]
     if walls:
-        lens = sorted((wb[2] - wb[0]) for wb in
+        lens = sorted(max(wb[2] - wb[0], wb[3] - wb[1]) for wb in
                       (e.world_bbox for e in walls if e.world_bbox))
         short = sum(1 for L in lens if L < 800)
         lines.append(f"  墙长分布: 最短{lens[0]:.0f}mm / 中位{lens[len(lens)//2]:.0f}mm / "
@@ -276,7 +276,7 @@ def registry_health(registry: ElementRegistry) -> dict:
              if e.category == "墙" and e.world_bbox]
     issues = []
     if walls:
-        lens = sorted((wb[2] - wb[0]) for wb in
+        lens = sorted(max(wb[2] - wb[0], wb[3] - wb[1]) for wb in
                       (e.world_bbox for e in walls if e.world_bbox))
         short = sum(1 for L in lens if L < 800)
         if short > len(walls) * 0.4:

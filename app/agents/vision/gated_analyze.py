@@ -179,7 +179,8 @@ def analyze_with_gate(dxf_path: str | Path, standard_png: str | Path, *,
     final_health = registry_health(registry)
     walls = [e for e in registry.elements if e.category == "墙"]
     frag_ratio = (sum(1 for e in walls if e.world_bbox
-                      and (e.world_bbox[2] - e.world_bbox[0]) < 800)
+                      and max(e.world_bbox[2] - e.world_bbox[0],
+                             e.world_bbox[3] - e.world_bbox[1]) < 800)
                   / max(len(walls), 1))
     passed = (frag_ratio <= _WALL_FRAG_MAX
               and final_health["room_count"] <= _ROOM_MAX)
