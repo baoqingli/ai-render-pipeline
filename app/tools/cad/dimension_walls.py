@@ -97,8 +97,8 @@ def extract_wall_lines(doc, min_measure: float = 400.0,
     # 分别聚类（axis 在构造后修正）
     v_lines = _cluster_with_axis("v", v_acc, cluster_tol)
     h_lines = _cluster_with_axis("h", h_acc, cluster_tol)
-    v_lines.sort(key=lambda l: -l.refs)
-    h_lines.sort(key=lambda l: -l.refs)
+    v_lines.sort(key=lambda wl: -wl.refs)
+    h_lines.sort(key=lambda wl: -wl.refs)
     return v_lines, h_lines
 
 
@@ -132,8 +132,8 @@ def build_dimension_walls(doc, min_refs: int = 2,
         return []
 
     # 建筑内域：所有高置信线的外包
-    xs = [l.coord for l in v_lines if l.refs >= min_refs]
-    ys = [l.coord for l in h_lines if l.refs >= min_refs]
+    xs = [ln.coord for ln in v_lines if ln.refs >= min_refs]
+    ys = [ln.coord for ln in h_lines if ln.refs >= min_refs]
     if not xs or not ys:
         return []
     x0, x1 = min(xs), max(xs)
