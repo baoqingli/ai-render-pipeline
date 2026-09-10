@@ -152,7 +152,7 @@ def _furniture_kit(b, idx: int, mats: dict):
         type_mat = mats["sanitary"]
     elif label in ("wardrobe", "cabinet"):
         type_mat = mats["wood"]
-    elif label in ("sofa", "armchair"):
+    elif label in ("sofa", "armchair", "chair"):
         type_mat = mats["upholstery"]
     else:
         type_mat = mats["default"]
@@ -235,7 +235,10 @@ def add_boxes(boxes):
             'upholstery': _mat('sv_uph', (1.0, 1.0, 0.0), emissive=True),  # 黄
             'door': _mat('sv_door', (1.0, 0.5, 0.0), emissive=True),        # 橙
         }
+        hide = set(filter(None, os.environ.get("ARP_HIDE", "").split(",")))
         for i, b in enumerate(boxes):
+            if b['kind'] in hide:
+                continue
             if b['kind'] == 'furniture':
                 _furniture_kit(b, i, mats)
                 continue

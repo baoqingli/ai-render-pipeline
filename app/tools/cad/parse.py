@@ -862,6 +862,36 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
     in_room = sum(1 for f in furniture
                   if any(Polygon(r.polygon).contains(Point(f.position)) for r in rooms))
     measured_n = sum(1 for f in furniture if f.measured)
+    # 4.5) 墙避家具裁剪：家具证据 = 开放空间（阳台椅/茶几所在处实际无墙）。
+    #      尺寸墙全宽延伸会横穿阳台/开敞区，把嵌墙家具处的墙挖掉。
+    if furniture:
+        from shapely.geometry import box as _shbox
+        furn_polys = []
+        for f in furniture:
+            fx, fy = f.position
+            fw, fd = f.size[0] / 2 + 150, f.size[1] / 2 + 150   # 家具半尺寸+150 缓冲
+            furn_polys.append(_shbox(fx - fw, fy - fd, fx + fw, fy + fd))
+        trimmed: list[Wall] = []
+        for w in walls:
+            wp = Polygon(w.polygon)
+            cut = wp
+            for fp in furn_polys:
+                if cut.is_empty:
+                    break
+                cut = cut.difference(fp)
+            if cut.is_empty or wp.area - cut.area < 0.05 * wp.area:
+                trimmed.append(w)               # 裁剪不足 5% 保留原样（微碰不算嵌墙）
+                continue
+            parts = [cut] if cut.geom_type == "Polygon"                 else [g for g in cut.geoms if g.geom_type == "Polygon" and g.area > 40_000]
+            if not parts:
+                continue                        # 全被家具覆盖 → 幻影墙删除
+            for p in parts:
+                trimmed.append(Wall(id=f"wall_{len(trimmed)+1:03d}",
+                                    polygon=[[round(x), round(y)]
+                                             for x, y in p.exterior.coords]))
+        walls = trimmed
+
+
     # 家具稀少提示：输入疑似系统图（精装图家具多为多段线，块提取少）
     if strict_furniture and 0 < len(furniture) < 15:
         fallbacks.append(f'家具实体稀少({len(furniture)}件)：输入可能为系统图，'
