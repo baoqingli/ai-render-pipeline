@@ -62,15 +62,16 @@ def erode(mask: list[list[bool]], k: int = 2) -> list[list[bool]]:
 
 def dilate(mask: list[list[bool]], k: int = 2) -> list[list[bool]]:
     """膨胀：补门洞/窗洞的小缝隙（wall gap closing）。"""
+    k = int(k)
     h, w = len(mask), len(mask[0])
     out = [[False] * w for _ in range(h)]
     for y in range(h):
         for x in range(w):
             if mask[y][x]:
-                for dy in range(-k, k + 1):
+                for dy in range(-int(k), int(k) + 1):
                     yy = y + dy
                     if 0 <= yy < h:
-                        for dx in range(-k, k + 1):
+                        for dx in range(-int(k), int(k) + 1):
                             xx = x + dx
                             if 0 <= xx < w:
                                 out[yy][xx] = True
