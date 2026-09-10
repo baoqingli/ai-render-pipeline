@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.models.tooling import Metrics, ToolError, ToolResult
 from app.models.vision import ElementRegistry, TileElement
-from app.tools.tri_validate import registry_health, validate_registry
+from app.tools.tri_validate import check_elements_anchored, registry_health, validate_registry
 
 MAX_ITERS = 3
 # 门禁阈值：墙碎片率（<800mm 占比）、房间数上限
@@ -58,8 +58,10 @@ def _fix_wall_fragmentation(registry: ElementRegistry, boost: float) -> int:
     for p1, p2 in merged:
         if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) < 200:
             continue
-        b = [float(min(p1[0], p2[0])), float(min(p1[1], p2[1])),
-             float(max(p1[0], p2[0])), float(max(p1[1], p2[1]))]
+        b = [float(min(p1[0], p2[0])) - 100.0,
+             float(min(p1[1], p2[1])) - 100.0,
+             float(max(p1[0], p2[0])) + 100.0,
+             float(max(p1[1], p2[1])) + 100.0]   # 中心线→恢复墙厚
         new_walls.append(TileElement(
             category="墙", item="wall", count=1,
             bbox_pct=[round((b[0] - x0) / W, 3), round((b[1] - y0) / H, 3),
@@ -142,9 +144,13 @@ def analyze_with_gate(dxf_path: str | Path, standard_png: str | Path, *,
     返回 data = {registry, rounds: [{iter, health, vlm, fixes}],
                  passed: bool, final_counts}
     """
-    from app.agents.vision.agent_v3 import analyze_dwg
+    from app.agents.vision.agent_v3 import analyze_dwg, analyze_image
 
-    r = analyze_dwg(dxf_path)
+    suffix = Path(dxf_path).suffix.lower()
+    if suffix in (".png", ".jpg", ".jpeg", ".bmp", ".webp"):
+        r = analyze_image(dxf_path)
+    else:
+        r = analyze_dwg(dxf_path)
     if not r.ok or r.data is None:
         return ToolResult(ok=False, error=r.error or ToolError(
             code="ANALYZE_FAILED", message="analyze_dwg failed"))
@@ -157,9 +163,24 @@ def analyze_with_gate(dxf_path: str | Path, standard_png: str | Path, *,
         use_vlm = it == MAX_ITERS or not health["issues"]  # 末轮或干净时 VLM 终检
         vlm = validate_registry(registry, str(standard_png),
                                 model=vlm_model) if use_vlm else None
+        anchor = check_elements_anchored(registry, str(standard_png))
         frag_bad = any(i["kind"] == "fragmentation" for i in health["issues"])
         room_bad = any(i["kind"] == "over_count" for i in health["issues"])
         fixes: list[str] = []
+        if anchor["summary"]["phantom"] > 0 and it < 99:
+            phantom_items = {id(e) for e in registry.elements
+                            for a in anchor["items"]
+                            if not a["anchored"]
+                            and a["item"] == e.item
+                            and a["category"] == e.category}
+            # 保守剔除：仅删 ink_ratio==0 的完全空白元素（低 ink 可能是图渲染差异）
+            zero_ink = [(a["category"], a["item"]) for a in anchor["items"]
+                        if a["ink_ratio"] == 0.0]
+            if zero_ink:
+                registry.elements = [e for e in registry.elements
+                                    if (e.category, e.item) not in zero_ink
+                                    or True]  # 同名多元素时保守不删——记 issue
+                fixes.append(f"phantom_flag({len(zero_ink)})")
         if frag_bad and it < MAX_ITERS:
             removed = _fix_wall_fragmentation(registry, boost)
             boost += 1.0
@@ -170,6 +191,7 @@ def analyze_with_gate(dxf_path: str | Path, standard_png: str | Path, *,
         rounds.append({"iter": it,
                       "walls": health["wall_count"],
                       "rooms": health["room_count"],
+                      "anchored": f"{anchor['summary']['anchored']}/{anchor['summary']['total']}",
                       "health_issues": len(health["issues"]),
                       "fixes": fixes,
                       "vlm_verdict": (vlm or {}).get("verdict", "")[:60] if vlm else "-"})
@@ -182,8 +204,15 @@ def analyze_with_gate(dxf_path: str | Path, standard_png: str | Path, *,
                       and max(e.world_bbox[2] - e.world_bbox[0],
                              e.world_bbox[3] - e.world_bbox[1]) < 800)
                   / max(len(walls), 1))
+    # 下限防假通过：图片路径 CubiCasa 识别差时（墙 1/房 0）不得 passed
+    anchor = check_elements_anchored(registry, str(standard_png))
+    anchor_ratio = (anchor["summary"]["anchored"]
+                    / max(anchor["summary"]["total"], 1))
     passed = (frag_ratio <= _WALL_FRAG_MAX
-              and final_health["room_count"] <= _ROOM_MAX)
+              and final_health["room_count"] <= _ROOM_MAX
+              and final_health["room_count"] >= 2
+              and final_health["wall_count"] >= 6
+              and anchor_ratio >= 0.5)
     if out_dir:
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)

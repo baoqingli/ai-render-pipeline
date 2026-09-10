@@ -14,8 +14,7 @@ import math
 from pathlib import Path
 
 from app.models.tooling import Metrics, ToolError, ToolResult
-from app.models.vision import (DrawingUnderstanding, ElementRegistry,
-                                TileElement, TileReport)
+from app.models.vision import DrawingUnderstanding, ElementRegistry, TileElement, TileReport
 
 # CubiCasa 图标类 → 登记簿类别
 _ICON_CAT = {
@@ -145,11 +144,18 @@ def analyze_image(png_path: str | Path, *, model: str | None = None,
             bbox_pct=[v / seg["size"] for v in b["bbox_px"]],
             confidence=0.7, tile=1, world_bbox=to_world(b["bbox_px"])))
 
+    from app.models.vision import CoordinateFrame
     reg = ElementRegistry(
         source_dxf=str(p), elements=elements,
         tiles=[TileReport(tile=1, drawing_type="furniture_layout",
                           elements=elements)],
         best_plan_view=str(p),
+        coordinate_frame=CoordinateFrame(
+            origin=[0.0, 0.0],
+            unit="mm" if px_per_mm else "px",
+            source="vlm_calibration" if px_per_mm else "pixel",
+            px_per_mm=px_per_mm,
+            width_px=seg["size"], height_px=seg["size"]),
         cross_notes=(f"CubiCasa5K 分割 {len(elements)} 元素；"
                      + (f"VLM 定标 {px_per_mm:.4f}px/mm（{len(dims)} 条尺寸参照）"
                         if px_per_mm else "未定标（图无可读尺寸，坐标为像素）")),
@@ -172,6 +178,7 @@ def analyze_dwg(dxf_path: str | Path, *,
     import contextlib as _cl
 
     import ezdxf as _ezdxf
+
     from app.models.scene import SceneJSON
     from app.tools.cad.parse import parse_scene
 
@@ -205,8 +212,17 @@ def analyze_dwg(dxf_path: str | Path, *,
         return ToolResult(ok=False, error=r.error or ToolError(
             code="PARSE_FAILED", message="parse_scene failed"))
     sc: SceneJSON = r.data
-    return ToolResult(ok=True, data=scene_to_registry(sc, str(dxf_path)),
-                      metrics=Metrics())
+    result = scene_to_registry(sc, str(dxf_path))
+    from app.models.vision import CoordinateFrame
+    xs = [p[0] for w in sc.walls for p in w.polygon]
+    ys = [p[1] for w in sc.walls for p in w.polygon]
+    for rm in sc.rooms:
+        xs += [p[0] for p in rm.polygon]
+        ys += [p[1] for p in rm.polygon]
+    result.coordinate_frame = CoordinateFrame(
+        origin=[float(min(xs)) if xs else 0.0, float(min(ys)) if ys else 0.0],
+        unit="mm", source="dimension_chain")
+    return ToolResult(ok=True, data=result, metrics=Metrics())
 
 
 def scene_to_registry(sc, source: str) -> ElementRegistry:
@@ -229,8 +245,9 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
         return [round(min(px)), round(min(py)), round(max(px)), round(max(py))]
 
     def pct(bbox):
-        return [round((bbox[0] - x0) / W, 3), round((bbox[1] - y0) / H, 3),
-                round((bbox[2] - x0) / W, 3), round((bbox[3] - y0) / H, 3)]
+        # y-down 图面坐标（与图片路径一致）：世界 y 向上 → 图面 y 翻转
+        return [round((bbox[0] - x0) / W, 3), round(1 - (bbox[3] - y0) / H, 3),
+                round((bbox[2] - x0) / W, 3), round(1 - (bbox[1] - y0) / H, 3)]
 
     elements = []
     # 墙碎片合并：多边形 → 中心线段 → snap+共线合并 → 外接矩形
@@ -262,8 +279,9 @@ def scene_to_registry(sc, source: str) -> ElementRegistry:
     merged_edges = merge_collinear(snap_endpoints(wall_segs))         if wall_segs else []
     n_walls = len(merged_edges)
     for p1, p2 in merged_edges:
-        b = [float(min(p1[0], p2[0])), float(min(p1[1], p2[1])),
-             float(max(p1[0], p2[0])), float(max(p1[1], p2[1]))]
+        # 中心线合并丢厚度（竖墙 x0==x1 零宽线）→ 横向恢复 ±100mm 墙厚
+        b = [float(min(p1[0], p2[0])) - 100.0, float(min(p1[1], p2[1])) - 100.0,
+             float(max(p1[0], p2[0])) + 100.0, float(max(p1[1], p2[1])) + 100.0]
         elements.append(TileElement(category="墙", item="wall", count=1,
                                     bbox_pct=pct(b), confidence=0.9,
                                     tile=1, world_bbox=b))

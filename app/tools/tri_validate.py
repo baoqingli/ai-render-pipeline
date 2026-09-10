@@ -292,3 +292,53 @@ def registry_health(registry: ElementRegistry) -> dict:
                        "action": "房间去重/IoU 合并"})
     return {"wall_count": len(walls), "room_count": len(rooms),
             "issues": issues}
+
+
+def check_elements_anchored(registry: ElementRegistry, standard_png: str,
+                           min_ink_ratio: float = 0.04) -> dict:
+    """逐元素锚定验证（确定性）：元素 bbox_pct 区域在标准图上须有图墨。
+
+    空白区元素 = 幻影（提取器虚构）。ink = 非近白像素占比。
+    返回 {items: [{item, ink_ratio, anchored}], summary}。
+    """
+    w, h, bpp, pix = decode_png(standard_png)
+    items = []
+    for e in registry.elements:
+        if not e.bbox_pct or len(e.bbox_pct) != 4:
+            continue
+        x0 = max(int(e.bbox_pct[0] * w), 0)
+        y0 = max(int(e.bbox_pct[1] * h), 0)
+        x1 = min(int(e.bbox_pct[2] * w), w - 1)
+        y1 = min(int(e.bbox_pct[3] * h), h - 1)
+        if x1 <= x0 or y1 <= y0:
+            items.append({"category": e.category, "item": e.item,
+                          "ink_ratio": 0.0, "anchored": False,
+                          "note": "degenerate_bbox"})
+            continue
+        # 窗口搜索：标准图坐标框与 registry 框有少量偏移（渲染 pad +
+        # 冻结视口差异 1~4%），细线元素单点采样必 miss → 以 bbox 为核心
+        # 在 ±3% 图幅邻域内取最大 ink（容忍帧偏移，仍能抓空白区幻影）
+        win = int(0.03 * min(w, h))
+        best_ratio = 0.0
+        for oy in (0, -win, win):
+            for ox in (0, -win, win):
+                sx0, sy0 = max(x0 + ox, 0), max(y0 + oy, 0)
+                sx1 = min(x1 + ox, w - 1)
+                sy1 = min(y1 + oy, h - 1)
+                if sx1 <= sx0 or sy1 <= sy0:
+                    continue
+                total = ink = 0
+                for y in range(sy0, sy1 + 1, 2):
+                    for x in range(sx0, sx1 + 1, 2):
+                        o = (y * w + x) * bpp
+                        total += 1
+                        if not all(v > 235 for v in (pix[o], pix[o+1], pix[o+2])):
+                            ink += 1
+                best_ratio = max(best_ratio, ink / max(total, 1))
+        items.append({"category": e.category, "item": e.item,
+                      "ink_ratio": round(best_ratio, 3),
+                      "anchored": best_ratio >= min_ink_ratio})
+    n_ok = sum(1 for i in items if i["anchored"])
+    return {"items": items, "summary": {"total": len(items),
+                                        "anchored": n_ok,
+                                        "phantom": len(items) - n_ok}}

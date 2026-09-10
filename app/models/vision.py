@@ -60,6 +60,23 @@ class TileReport(BaseModel):
     elements: list[TileElement] = []
 
 
+class CoordinateFrame(BaseModel):
+    """坐标系声明：识图输出的所有 world_bbox 在哪个系里。
+
+    source 决定坐标可信度：
+      dimension_chain — DXF 尺寸链 defpoints（mm，设计精度）
+      vlm_calibration — 图上尺寸文字定标（mm，比例尺中位数精度）
+      pixel           — 无尺寸图（像素坐标，仅相对位置/大小有意义）
+    px_per_mm > 0 时 bbox 与像素可互算。
+    """
+    origin: list[float] = Field(default_factory=lambda: [0.0, 0.0])
+    unit: str = "mm"                    # mm | px
+    source: str = "pixel"
+    px_per_mm: float | None = None
+    width_px: int = 0                   # 定标源图幅（像素↔mm 互算用）
+    height_px: int = 0
+
+
 class ElementRegistry(BaseModel):
     """多图交叉验证后的元素登记簿（识别 Agent 最终输出，供后续模块消费）。"""
     source_dxf: str = ""
@@ -68,3 +85,4 @@ class ElementRegistry(BaseModel):
     best_plan_view: str = ""     # 最详尽的布局平面图（视图标识）
     cross_notes: str = ""
     model: str = ""
+    coordinate_frame: CoordinateFrame | None = None
