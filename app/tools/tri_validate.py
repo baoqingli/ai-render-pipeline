@@ -8,6 +8,8 @@
 合并输出：score + 结构化差异（kind/severity/description/action）。
 """
 
+from pathlib import Path
+
 from app.models.vision import ElementRegistry
 from app.tools.blender.imgstat import decode_png
 
@@ -47,12 +49,17 @@ def _expected_rgb(category: str, item: str):
 
 
 def check_registry_in_render(registry: ElementRegistry, render_png: str,
-                             window: int = 8) -> dict:
+                             window: int = 8,
+                             build_plan_json: str | None = None) -> dict:
     """信号1：registry 每元素 → 渲染图对应像素 → 颜色核对（确定性）。
 
+    build_plan_json：渲染所用 build_plan——传入则直接读真实 iso 相机参数
+    （position/ortho_scale），映射与渲染完全一致；缺省按 bbox 估算。
     返回 {items: [{category, item, pixel, rendered}], summary}。
     要求渲染图为语义配色（ARP_SEMANTIC_COLORS=1）。
     """
+    import json as _json
+
     w, h, bpp, pix = decode_png(render_png)
     boxes = [e.world_bbox for e in registry.elements if e.world_bbox]
     if not boxes:
@@ -63,11 +70,22 @@ def check_registry_in_render(registry: ElementRegistry, render_png: str,
     y1 = max(b[3] for b in boxes)
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
     scale = max(x1 - x0, y1 - y0) * 1.15
+    if build_plan_json and Path(build_plan_json).exists():
+        plan = _json.loads(Path(build_plan_json).read_text(encoding="utf-8"))
+        cams = [c for c in plan.get("cameras", [])
+                if c.get("view_id") == "view_iso"]
+        if cams and cams[0].get("ortho"):
+            cx = float(cams[0]["position"][0])
+            cy = float(cams[0]["position"][1])
+            scale = float(cams[0]["ortho_scale"])
     hw, hh = scale / 2, scale / 2 * (h / w)
+    # 相机坐标是归一化系（0 起）；registry 是世界系——用 registry bbox 原点
+    # 对齐两系（registry 由同一 scene 生成，其 bbox min = normalize 偏移）
+    off_x, off_y = (x0, y0) if build_plan_json else (0.0, 0.0)
 
     def to_px(wx, wy):
-        return (int((wx - (cx - hw)) / scale * w),
-                int(((cy + hh) - wy) / (scale * h / w) * h))
+        return (int(((wx - off_x) - (cx - hw)) / scale * w),
+                int(((cy + hh) - (wy - off_y)) / (scale * h / w) * h))
 
     items = []
     for e in registry.elements:
@@ -81,14 +99,16 @@ def check_registry_in_render(registry: ElementRegistry, render_png: str,
                       ((bx0 + bx1) / 2, by0 + (by1 - by0) * 0.2),
                       ((bx0 + bx1) / 2, by0 + (by1 - by0) * 0.8)]
         want = _expected_rgb(e.category, e.item)
+        # 门标记条很薄（~8px 高）：门类用更大搜索窗
+        win = 20 if e.category == '门' else window
         found = False
         hit_px = None
         for swx, swy in sample_pts:
             ex, ey = to_px(swx, swy)
             if not (0 <= ex < w and 0 <= ey < h):
                 continue
-            for dy in range(-window, window + 1, 2):
-                for dx in range(-window, window + 1, 2):
+            for dy in range(-win, win + 1, 2):
+                for dx in range(-win, win + 1, 2):
                     x_, y_ = ex + dx, ey + dy
                     if not (0 <= x_ < w and 0 <= y_ < h):
                         continue
@@ -122,7 +142,8 @@ def score(ratio: float, penalty_per_missing: float = 6.0) -> int:
 
 def tri_validate(registry: ElementRegistry, render_png: str,
                  standard_png: str | None = None, *,
-                 vlm_model: str | None = None) -> dict:
+                 vlm_model: str | None = None,
+                 build_plan_json: str | None = None) -> dict:
     """三向对账主入口。
 
     registry: v3 输出（mm 或像素坐标，与渲染图同源即可）
@@ -132,7 +153,8 @@ def tri_validate(registry: ElementRegistry, render_png: str,
     """
     from app.tools.validation_loop import validate_render
 
-    s1 = check_registry_in_render(registry, render_png)
+    s1 = check_registry_in_render(registry, render_png,
+                                  build_plan_json=build_plan_json)
     ratio = s1["summary"]["rendered"] / max(s1["summary"]["total"], 1)
     result: dict = {"signal1": s1, "combined_score": score(ratio)}
 
