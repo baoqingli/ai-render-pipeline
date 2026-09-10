@@ -22,6 +22,16 @@ _CAT_EN = {
     "固定柜": "built-in cabinet", "设备": "appliance", "其他": "room",
     "房间边界": "room",
 }
+# CubiCasa 英文类名 → 中文（布局描述/审阅用）
+_ITEM_ZH = {
+    "Living Room": "客厅", "Bedroom": "卧室", "Kitchen": "厨房", "Bath": "卫生间",
+    "Hallway": "走廊", "Storage": "储物间", "Garage": "车库", "Other rooms": "其他房间",
+    "Outdoor": "室外/阳台", "Wall": "墙体", "Door": "门", "Window": "窗",
+    "Closet": "衣柜", "Electr. Appl.": "电器", "Toilet": "马桶", "Sink": "台盆",
+    "Bathtub": "浴缸", "Sauna bench": "桑拿椅", "Fire Place": "壁炉",
+    "Chimney": "烟道", "Railing": "栏杆",
+}
+
 _ITEM_EN = {
     "bed": "double bed with pillows and headboard", "sofa": "sofa",
     "table": "table", "chair": "chair", "wardrobe": "wardrobe",
@@ -42,8 +52,8 @@ def layout_description_zh(reg: ElementRegistry) -> str:
         by_cat.get("厨房", []) + by_cat.get("卫浴", []) + \
         by_cat.get("走廊通道", []) + by_cat.get("阳台", [])
     if rooms:
-        lines.append(f"功能区 {len(rooms)} 个：" +
-                     "、".join(f"{r.item}" for r in rooms))
+        names = [_ITEM_ZH.get(r.item, r.item) for r in rooms]
+        lines.append(f"功能区 {len(rooms)} 个：" + "、".join(names))
     if "门" in by_cat:
         lines.append(f"门 {len(by_cat['门'])} 樘")
     if "窗" in by_cat:
@@ -53,7 +63,8 @@ def layout_description_zh(reg: ElementRegistry) -> str:
         seen: dict[str, int] = {}
         for f in furn:
             seen[f.item] = seen.get(f.item, 0) + 1
-        lines.append("家具：" + "、".join(f"{k}×{v}" for k, v in seen.items()))
+        zh_seen = {_ITEM_ZH.get(k, k): v for k, v in seen.items()}
+        lines.append("家具：" + "、".join(f"{k}×{v}" for k, v in zh_seen.items()))
     lines.append(f"坐标单位：{reg.cross_notes}")
     return "\n".join(lines)
 
