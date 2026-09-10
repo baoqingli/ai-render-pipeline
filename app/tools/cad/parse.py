@@ -715,12 +715,23 @@ def parse_scene(dxf_path: str | Path, report: CadReport | None = None,
 
     for ins in msp.query("INSERT"):
         layer, name = ins.dxf.layer, ins.dxf.name
+        lw2 = f"{layer} {name}"
+        if R.DOOR_HINT_RE.search(lw2) or R.WINDOW_HINT_RE.search(lw2):
+            continue               # 门/窗块已在上方捕获，防双计数
         if not _accept(layer) or R.NOISE_BLOCK_RE.match(name) \
                 or R.MEP_BLOCK_RE.search(name):
             continue
         ftype = _classify_type(name, layer)
         if ftype is None:
-            continue
+            # 墙/MEP 图层块跳过（如 01-原始结构承重墙柱），防止归 cabinet 兜底
+            # 后被墙-家具裁剪逻辑截短真实结构墙
+            if R.WALL_FILL_LAYER_RE.search(layer) or R.WALL_LAYER_RE.search(layer) \
+                    or R.MEP_LAYER_RE.search(layer):
+                continue
+            # 家具图层上无关键词命中的块不丢弃（真图块名多为拼音/编号）→ 归 cabinet 兜底
+            if not R.FURNITURE_LAYER_RE.search(layer):
+                continue
+            ftype = R.FURNITURE_TYPES[-1]
         world_size, center, ok = _measure_insert(ins, scale, doc)
         if ok and world_size is not None:
             local = _unrotate_size(world_size[0], world_size[1], ins.dxf.rotation)
