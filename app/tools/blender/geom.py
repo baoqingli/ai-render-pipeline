@@ -298,6 +298,17 @@ def build_plan(scene: SceneJSON, output_dir: str) -> BuildPlan:
         for seg in segment_wall(base, openings):
             boxes.append(PlanBox(center=list(seg.center), size=list(seg.size),
                                  rot_z=seg.rot_z, kind="wall"))
+        # 门洞地面标记条（高 50mm 橙色）：俯视图过梁会盖住门洞，
+        # 地面标记让门洞位置在俯视校验中可见
+        for d in door_by_wall.get(wall.id, []):
+            op = project_opening(base, d.position, d.width, 0.0, d.height)
+            lo, hi = op.u - op.width / 2, op.u + op.width / 2
+            lo_c, hi_c = max(lo, -base.size[0] / 2), min(hi, base.size[0] / 2)
+            if hi_c - lo_c > 100:
+                thr = _local_box(base, (lo_c + hi_c) / 2, hi_c - lo_c, 0, 50)
+                boxes.append(PlanBox(center=list(thr.center),
+                                     size=[thr.size[0], thr.size[1] * 0.4, 50],
+                                     rot_z=thr.rot_z, kind="frame", label="door"))
         for w in wins:
             op = project_opening(base, w.position, w.width,
                                  w.sill_height, w.sill_height + w.height)

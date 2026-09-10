@@ -233,6 +233,7 @@ def add_boxes(boxes):
             'sanitary': _mat('sv_san', (0.0, 1.0, 0.0), emissive=True),    # 绿
             'wood': _mat('sv_wood', (0.0, 0.0, 1.0), emissive=True),       # 蓝
             'upholstery': _mat('sv_uph', (1.0, 1.0, 0.0), emissive=True),  # 黄
+            'door': _mat('sv_door', (1.0, 0.5, 0.0), emissive=True),        # 橙
         }
         for i, b in enumerate(boxes):
             if b['kind'] == 'furniture':
@@ -248,7 +249,10 @@ def add_boxes(boxes):
             bpy.ops.object.transform_apply(scale=True)
             o.location = (b['center'][0]*S, b['center'][1]*S, b['center'][2]*S)
             o.rotation_euler[2] = b.get('rot_z', 0.0)
-            m = mat_wall if b['kind'] == 'wall' else mat_floor
+            if b.get('label') == 'door':
+                m = mats['door']
+            else:
+                m = mat_wall if b['kind'] == 'wall' else mat_floor
             o.data.materials.clear()
             o.data.materials.append(m)
             _bevel(o)
