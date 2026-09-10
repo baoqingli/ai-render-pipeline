@@ -28,6 +28,7 @@ from app.models.tooling import Metrics, ToolError, ToolResult
 from app.models.vision import DrawingUnderstanding
 from app.tools.cache import build_cache_key
 from app.tools.cad import rules as R
+from app.tools.cad.dimension_walls import build_dimension_walls
 from app.tools.cad.geometry import pair_wall_segments
 from app.tools.cad.inspect import inspect_dxf
 from app.tools.cad.walls import (
@@ -37,7 +38,6 @@ from app.tools.cad.walls import (
     strip_covered_by_edges,
 )
 from app.tools.cad_render import model_extent
-from app.tools.cad.dimension_walls import build_dimension_walls
 
 POLY_FURN_AREA_MIN = 100_000
 POLY_FURN_AREA_MAX = 12_000_000

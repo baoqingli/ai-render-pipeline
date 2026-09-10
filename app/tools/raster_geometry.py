@@ -7,7 +7,6 @@
 墙提取用经典形态学（阈值→闭运算补门洞→连通域→矩形拟合），
 参考 Raster-to-Vector (ICCV'17) 的非深度学习基线。
 """
-import math
 from dataclasses import dataclass, field
 
 from app.tools.blender.imgstat import decode_png
@@ -83,7 +82,7 @@ def connected_components(mask: list[list[bool]],
     """连通域（8 邻域 BFS）→ [{bbox, area}]，过滤小域（文字/噪点）。"""
     h, w = len(mask), len(mask[0])
     seen = [[False] * w for _ in range(h)]
-    comps = []
+    comps: list[dict] = []
     for sy in range(h):
         for sx in range(w):
             if mask[sy][sx] and not seen[sy][sx]:

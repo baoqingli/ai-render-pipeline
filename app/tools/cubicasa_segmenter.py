@@ -91,7 +91,7 @@ def room_polygons(seg: dict, min_area_px: int = 80) -> list[dict]:
         out.append({
             "type": ROOM_CLS[cls_idx],
             "bbox_px": [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())],
-            "area_px": int(len(xs)),
+            "area_px": len(xs),
         })
     return out
 

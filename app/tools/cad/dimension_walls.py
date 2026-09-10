@@ -8,10 +8,8 @@
 比图层扫描/VLM 分区矩形精确一个量级（defpoints 是毫米级设计坐标）。
 """
 import contextlib
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-import ezdxf
 from shapely.geometry import Polygon
 
 
