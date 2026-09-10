@@ -7,6 +7,7 @@
 - 块遍历走手动矩阵链（virtual_entities 对含 HATCH 块静默失败，见白模修正方案 §7）
 """
 import contextlib
+import math
 import re
 import struct
 import zlib
@@ -171,6 +172,15 @@ def _walk_entity(e, cv: Canvas) -> None:
                 pts.append(pts[0])
                 for a, b in pairwise(pts):
                     cv.line(a[0], a[1], b[0], b[1], rgb)
+        elif t == "CIRCLE":
+            r_ = e.dxf.radius
+            cx_, cy_ = e.dxf.center.x, e.dxf.center.y
+            steps = max(16, int(r_ / 50))
+            pts = [(cx_ + r_ * math.cos(2 * math.pi * i / steps),
+                    cy_ + r_ * math.sin(2 * math.pi * i / steps))
+                   for i in range(steps + 1)]
+            for a, b in pairwise(pts):
+                cv.line(a[0], a[1], b[0], b[1], rgb)
 
 
 def render_modelspace(doc, view: tuple[float, float, float, float],

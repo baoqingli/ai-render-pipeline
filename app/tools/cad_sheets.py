@@ -8,6 +8,7 @@
 - pick_layout_view：确定性评分选"布置图"（家具/床类实体密度最高）
 """
 import contextlib
+import math
 from collections import Counter
 from dataclasses import dataclass
 from itertools import pairwise
@@ -111,6 +112,10 @@ def render_sheet_view(doc, sv: SheetView, out_png: str | Path,
                 for p in e.get_points():
                     xs.append(p[0])
                     ys.append(p[1])
+            elif e.dxftype() == "CIRCLE":
+                r_ = e.dxf.radius
+                xs += [e.dxf.center.x - r_, e.dxf.center.x + r_]
+                ys += [e.dxf.center.y - r_, e.dxf.center.y + r_]
     if not xs:
         raise ValueError("视口无可见内容")
     x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
@@ -152,5 +157,23 @@ def render_sheet_view(doc, sv: SheetView, out_png: str | Path,
                             w = [m.transform((p[0], p[1], 0)) for p in pts]
                             for a, b in pairwise([(v.x, v.y) for v in w]):
                                 cv.line(a[0], a[1], b[0], b[1], sub_rgb)
+                        elif st == "CIRCLE":
+                            r_ = sub.dxf.radius
+                            c0 = m.transform((sub.dxf.center.x, sub.dxf.center.y, 0))
+                            steps = max(16, int(r_ / 50))
+                            pts = [(c0.x + r_ * math.cos(2 * math.pi * i / steps),
+                                    c0.y + r_ * math.sin(2 * math.pi * i / steps))
+                                   for i in range(steps + 1)]
+                            for a, b in pairwise(pts):
+                                cv.line(a[0], a[1], b[0], b[1], sub_rgb)
+            elif t == "CIRCLE":
+                r_ = e.dxf.radius
+                cx_, cy_ = e.dxf.center.x, e.dxf.center.y
+                steps = max(16, int(r_ / 50))
+                pts = [(cx_ + r_ * math.cos(2 * math.pi * i / steps),
+                        cy_ + r_ * math.sin(2 * math.pi * i / steps))
+                       for i in range(steps + 1)]
+                for a, b in pairwise(pts):
+                    cv.line(a[0], a[1], b[0], b[1], rgb)
     cv.save(str(out_png))
     return (x0, y0, x1, y1)
