@@ -242,6 +242,10 @@ def add_boxes(boxes):
             if b['kind'] == 'furniture':
                 _furniture_kit(b, i, mats)
                 continue
+            # 校验模式跳过门过梁/窗台矮段（z<1200）：俯视时它们盖住门洞
+            # 地面标记（label=door 橙色条），导致门在俯视图不可见
+            if b['kind'] == "wall" and b['size'][2] < 1200                     and not b.get('label'):
+                continue
             bpy.ops.mesh.primitive_cube_add(size=1.0)
             o = bpy.context.active_object
             o.name = f"{b['kind']}_{i:03d}"

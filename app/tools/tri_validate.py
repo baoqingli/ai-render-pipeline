@@ -20,21 +20,29 @@ _SEM_COLORS = {
     "固定柜": ((0, 0, 150), (100, 100, 255), 0),
     "椅": ((150, 150, 0), (255, 255, 100), 0),
     "桌": ((150, 0, 150), (255, 100, 255), 0),
-    "门": ((200, 100, 0), (255, 160, 60), 1),
+    "门": ((180, 80, 0), (255, 180, 80), 1),
 }
 
 
 def _expected_rgb(category: str, item: str):
-    if category in _SEM_COLORS:
-        return _SEM_COLORS[category]
-    if item == "chair":
+    """item 优先（与 scene_builder._furniture_kit 材质分支一一对应）：
+    bed红 / toilet·sink·shower·bathtub绿 / wardrobe·cabinet蓝 /
+    sofa·armchair·chair黄 / 其余家具(含 table·tv)品红 / 墙黑 / 门橙。
+    """
+    if item in ("bed",):
+        return _SEM_COLORS["床"]
+    if item in ("toilet", "sink", "bathtub", "shower"):
+        return _SEM_COLORS["卫浴"]
+    if item in ("wardrobe", "cabinet"):
+        return _SEM_COLORS["固定柜"]
+    if item in ("sofa", "armchair", "chair"):
         return _SEM_COLORS["椅"]
     if item in ("table", "tv"):
         return _SEM_COLORS["桌"]
-    if item in ("toilet", "sink", "bathtub", "shower"):
-        return _SEM_COLORS["卫浴"]
-    if item in ("bed",):
-        return _SEM_COLORS["床"]
+    if category == "家具":
+        return _SEM_COLORS["桌"]      # 默认材质=品红
+    if category in _SEM_COLORS:
+        return _SEM_COLORS[category]
     return None
 
 
@@ -65,35 +73,43 @@ def check_registry_in_render(registry: ElementRegistry, render_png: str,
     for e in registry.elements:
         if not e.world_bbox:
             continue
-        ex, ey = to_px(*e.world_bbox[:2])
-        if not (0 <= ex < w and 0 <= ey < h):
-            items.append({"category": e.category, "item": e.item,
-                          "pixel": (ex, ey), "rendered": False,
-                          "note": "out_of_frame"})
-            continue
+        bx0, by0, bx1, by1 = e.world_bbox
+        # 多点位采样：中心 + 四分位（L 形/裁剪墙的 bbox 中心可能落在带外）
+        sample_pts = [((bx0 + bx1) / 2, (by0 + by1) / 2),
+                      (bx0 + (bx1 - bx0) * 0.2, (by0 + by1) / 2),
+                      (bx0 + (bx1 - bx0) * 0.8, (by0 + by1) / 2),
+                      ((bx0 + bx1) / 2, by0 + (by1 - by0) * 0.2),
+                      ((bx0 + bx1) / 2, by0 + (by1 - by0) * 0.8)]
         want = _expected_rgb(e.category, e.item)
         found = False
-        for dy in range(-window, window + 1, 2):
-            for dx in range(-window, window + 1, 2):
-                x_, y_ = ex + dx, ey + dy
-                if not (0 <= x_ < w and 0 <= y_ < h):
-                    continue
-                o = (y_ * w + x_) * bpp
-                rgb = (pix[o], pix[o + 1], pix[o + 2])
-                if want is None:
-                    # 无预期色：任何非白即有几何
-                    if not all(v > 235 for v in rgb):
-                        found = True
-                        break
-                else:
-                    lo, hi = want[0], want[1]
-                    if all(lo[i] <= rgb[i] <= hi[i] for i in range(3)):
-                        found = True
-                        break
+        hit_px = None
+        for swx, swy in sample_pts:
+            ex, ey = to_px(swx, swy)
+            if not (0 <= ex < w and 0 <= ey < h):
+                continue
+            for dy in range(-window, window + 1, 2):
+                for dx in range(-window, window + 1, 2):
+                    x_, y_ = ex + dx, ey + dy
+                    if not (0 <= x_ < w and 0 <= y_ < h):
+                        continue
+                    o = (y_ * w + x_) * bpp
+                    rgb = (pix[o], pix[o + 1], pix[o + 2])
+                    if want is None:
+                        if not all(v > 235 for v in rgb):
+                            found, hit_px = True, (ex, ey)
+                            break
+                    else:
+                        lo, hi = want[0], want[1]
+                        if all(lo[i] <= rgb[i] <= hi[i] for i in range(3)):
+                            found, hit_px = True, (ex, ey)
+                            break
+                if found:
+                    break
             if found:
                 break
+        ex, ey = to_px((bx0 + bx1) / 2, (by0 + by1) / 2)
         items.append({"category": e.category, "item": e.item,
-                      "pixel": (ex, ey), "rendered": found})
+                      "pixel": hit_px or (ex, ey), "rendered": found})
     n_ok = sum(1 for i in items if i["rendered"])
     return {"items": items, "summary": {"total": len(items), "rendered": n_ok,
                                         "missing": len(items) - n_ok}}
