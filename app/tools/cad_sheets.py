@@ -74,14 +74,12 @@ def pick_layout_view(
 
     返回 (最佳视口, 全部视口评分列表)。
     """
-    doc = doc
     msp = doc.modelspace()
     views = layout_sheet_views(doc, layout_name)
     scored: list[tuple[int, int, int, SheetView]] = []
     for sv in views:
         counts = count_furniture_entities(msp, sv.frozen_layers)
         total = sum(counts.values())
-        # 同分取冻结图层更多者（更精选的图层组合 = 更接近专项布置图）
         scored.append((total, len(sv.frozen_layers), -len(scored), sv))
     scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
     ranked = [sv for _, _, _, sv in scored]
@@ -89,15 +87,49 @@ def pick_layout_view(
     return best, ranked
 
 
+def _hatch_boundary_pts(e) -> list[tuple[float, float]]:
+    """提取 HATCH 图元边界折线点（支持直线段和圆弧边）。"""
+    pts: list[tuple[float, float]] = []
+    with contextlib.suppress(Exception):
+        for pth in e.paths:
+            if hasattr(pth, "vertices"):
+                pts += [(v[0], v[1]) for v in pth.vertices]
+            else:
+                for ed in pth.edges:
+                    tn = type(ed).__name__
+                    if tn == "LineEdge":
+                        pts.append((ed.start[0], ed.start[1]))
+                        pts.append((ed.end[0], ed.end[1]))
+                    elif tn == "ArcEdge":
+                        cx, cy, r = ed.center[0], ed.center[1], ed.radius
+                        a0 = math.radians(ed.start_angle)
+                        a1 = math.radians(ed.end_angle)
+                        if a1 <= a0:
+                            a1 += 2 * math.pi
+                        steps = max(8, int(abs(a1 - a0) / (math.pi / 8)))
+                        for i in range(steps + 1):
+                            a = a0 + (a1 - a0) * i / steps
+                            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
+
+
 def render_sheet_view(doc, sv: SheetView, out_png: str | Path,
-                      width_px: int = 1600) -> tuple[float, float, float, float]:
-    """渲染该视口可见内容（冻结图层过滤）→ 布置图参考图。返回实际裁剪框。"""
+                      width_px: int = 1600,
+                      extra_hatch_layers: set[str] | None = None
+                      ) -> tuple[float, float, float, float]:
+    """渲染该视口可见内容（冻结图层过滤）→ 布置图参考图。返回实际裁剪框。
+
+    extra_hatch_layers: 即使被视口冻结，也强制渲染这些图层的 HATCH 边界（用于
+    把地面材质填充叠加到家具布置图上，以区分卫生间/卧室区域）。
+    """
     msp = doc.modelspace()
     frozen = sv.frozen_layers
+    _extra = extra_hatch_layers or set()
 
     def visible(ent) -> bool:
         with contextlib.suppress(Exception):
-            return ent.dxf.layer not in frozen
+            lay = ent.dxf.layer
+            return lay not in frozen or lay in _extra
         return True
 
     xs, ys = [], []
@@ -105,19 +137,35 @@ def render_sheet_view(doc, sv: SheetView, out_png: str | Path,
         if not visible(e):
             continue
         with contextlib.suppress(Exception):
-            if e.dxftype() == "LINE":
+            t = e.dxftype()
+            if t == "LINE":
                 xs += [e.dxf.start.x, e.dxf.end.x]
                 ys += [e.dxf.start.y, e.dxf.end.y]
-            elif e.dxftype() == "LWPOLYLINE":
+            elif t == "LWPOLYLINE":
                 for p in e.get_points():
                     xs.append(p[0])
                     ys.append(p[1])
-            elif e.dxftype() == "CIRCLE":
+            elif t == "CIRCLE":
                 r_ = e.dxf.radius
                 xs += [e.dxf.center.x - r_, e.dxf.center.x + r_]
                 ys += [e.dxf.center.y - r_, e.dxf.center.y + r_]
     if not xs:
         raise ValueError("视口无可见内容")
+    # 先用线条范围作为基准，HATCH 点只在此范围 20% 余量内才纳入 extent
+    bx0, by0, bx1, by1 = min(xs), min(ys), max(xs), max(ys)
+    bw, bh = bx1 - bx0, by1 - by0
+    margin_x, margin_y = bw * 0.2, bh * 0.2
+    for e in msp:
+        if not visible(e):
+            continue
+        if e.dxftype() != "HATCH":
+            continue
+        with contextlib.suppress(Exception):
+            for px, py in _hatch_boundary_pts(e):
+                if (bx0 - margin_x <= px <= bx1 + margin_x and
+                        by0 - margin_y <= py <= by1 + margin_y):
+                    xs.append(px)
+                    ys.append(py)
     x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
     pad = (x1 - x0) * 0.02
     cv = Canvas(x0 - pad, y0 - pad, x1 + pad, y1 + pad, width_px)
@@ -175,5 +223,15 @@ def render_sheet_view(doc, sv: SheetView, out_png: str | Path,
                        for i in range(steps + 1)]
                 for a, b in pairwise(pts):
                     cv.line(a[0], a[1], b[0], b[1], rgb)
+            elif t == "HATCH":
+                hpts = [
+                    (px, py) for px, py in _hatch_boundary_pts(e)
+                    if (x0 - (x1-x0)*0.2 <= px <= x1 + (x1-x0)*0.2 and
+                        y0 - (y1-y0)*0.2 <= py <= y1 + (y1-y0)*0.2)
+                ]
+                if len(hpts) >= 2:
+                    closed_pts = hpts + [hpts[0]]
+                    for a, b in pairwise(closed_pts):
+                        cv.line(a[0], a[1], b[0], b[1], rgb)
     cv.save(str(out_png))
     return (x0, y0, x1, y1)

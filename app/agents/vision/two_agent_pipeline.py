@@ -43,8 +43,12 @@ def vision_agent(file_path: str | Path) -> tuple[ElementRegistry, Path]:
         out_img = p.parent / "_two_agent_layout.png"
         doc = ezdxf.readfile(str(p))
         best_sv, _ = pick_layout_view(doc)
+        # 强制叠加地面材质填充图层，即使在家具布置视口中被冻结
+        # 使卫生间区域在 layout.png 里具备可识别的视觉特征
+        _gnd_layers = {"GND-地面材质填充", "GND-地面铺装"}
         if best_sv is not None:
-            render_sheet_view(doc, best_sv, out_img, width_px=1600)
+            render_sheet_view(doc, best_sv, out_img, width_px=1600,
+                              extra_hatch_layers=_gnd_layers)
         else:
             render_modelspace(doc, model_extent(doc), 1600, out_img)
         return r.data, out_img

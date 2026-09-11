@@ -1,11 +1,23 @@
 {
   "comment": "室内设计三模块工作流 v1（SDXL + 双ControlNet + 两阶段放大）",
-  "comment_models": "需要: sd_xl_base_1.0.safetensors / xinsir/controlnet-lineart-sdxl-1.0 / xinsir/controlnet-depth-sdxl-1.0",
+  "comment_models": "需要: interiorSceneXL_v1.safetensors + JJsModernStyle_XL.safetensors / xinsir/controlnet-lineart-sdxl-1.0 / xinsir/controlnet-depth-sdxl-1.0",
 
   "1": {
     "class_type": "CheckpointLoaderSimple",
-    "_comment": "模块一: Checkpoint 加载",
-    "inputs": { "ckpt_name": "__CHECKPOINT__" }
+    "_comment": "模块一: Checkpoint 加载（Interior Scene XL，酒店/室内专用 SDXL）",
+    "inputs": { "ckpt_name": "interiorSceneXL_v1.safetensors" }
+  },
+
+  "19": {
+    "class_type": "LoraLoader",
+    "_comment": "LoRA: JJs Modern Style XL，触发词 'Modern Style'，强度 0.8",
+    "inputs": {
+      "model": ["1", 0],
+      "clip": ["1", 1],
+      "lora_name": "JJsModernStyle_XL.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0.8
+    }
   },
 
   "2": {
@@ -37,7 +49,7 @@
     "_comment": "正向提示词: Lora触发词 + 质量词 + 家具描述（从prompt.txt填入）",
     "inputs": {
       "text": "__POSITIVE__",
-      "clip": ["1", 1]
+      "clip": ["19", 1]
     }
   },
 
@@ -46,7 +58,7 @@
     "_comment": "负向提示词",
     "inputs": {
       "text": "__NEGATIVE__",
-      "clip": ["1", 1]
+      "clip": ["19", 1]
     }
   },
 
@@ -128,7 +140,7 @@
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
       "denoise": 0.85,
-      "model": ["1", 0],
+      "model": ["19", 0],
       "positive": ["9", 0],
       "negative": ["9", 1],
       "latent_image": ["12", 0]
@@ -155,7 +167,7 @@
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
       "denoise": 0.45,
-      "model": ["1", 0],
+      "model": ["19", 0],
       "positive": ["9", 0],
       "negative": ["9", 1],
       "latent_image": ["14", 0]

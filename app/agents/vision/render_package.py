@@ -41,6 +41,58 @@ _ITEM_EN = {
     "Closet": "walk-in closet", "Electr. Appl.": "appliance",
 }
 
+# 洁具关键词 → 该区域推断为卫生间
+_BATHROOM_ITEMS = {"toilet", "bathtub", "shower", "sink"}
+# 卧室关键词
+_BEDROOM_ITEMS = {"bed"}
+
+# 方位描述（归一化 bbox_pct 中心 → 方向词）
+def _quadrant(cx: float, cy: float) -> str:
+    """将归一化图像坐标 (cx, cy) 映射为方位词，y 轴向下（图像坐标系）。"""
+    v = "upper" if cy < 0.45 else ("lower" if cy > 0.55 else "center")
+    h = "left"  if cx < 0.40 else ("right"  if cx > 0.60 else "")
+    return (v + "-" + h).rstrip("-") if h else v
+
+
+def _infer_zones(reg: ElementRegistry) -> list[dict]:
+    """从 elements 里的洁具/床推断功能区，返回 [{zone, direction, items}]。"""
+    zones: list[dict] = []
+    # 按 bbox 中心聚合洁具
+    bathroom_pts: list[tuple[float, float]] = []
+    bathroom_items: list[str] = []
+    bedroom_pts:  list[tuple[float, float]] = []
+
+    for e in reg.elements:
+        item = (e.item or "").lower()
+        bp = e.bbox_pct
+        if not bp or len(bp) < 4:
+            continue
+        cx = (bp[0] + bp[2]) / 2
+        cy = (bp[1] + bp[3]) / 2
+        if item in _BATHROOM_ITEMS:
+            bathroom_pts.append((cx, cy))
+            bathroom_items.append(_ITEM_EN.get(e.item, e.item))
+        elif item in _BEDROOM_ITEMS:
+            bedroom_pts.append((cx, cy))
+
+    if bathroom_pts:
+        avg_x = sum(p[0] for p in bathroom_pts) / len(bathroom_pts)
+        avg_y = sum(p[1] for p in bathroom_pts) / len(bathroom_pts)
+        zones.append({
+            "zone": "bathroom",
+            "direction": _quadrant(avg_x, avg_y),
+            "items": list(dict.fromkeys(bathroom_items)),
+        })
+    if bedroom_pts:
+        avg_x = sum(p[0] for p in bedroom_pts) / len(bedroom_pts)
+        avg_y = sum(p[1] for p in bedroom_pts) / len(bedroom_pts)
+        zones.append({
+            "zone": "bedroom",
+            "direction": _quadrant(avg_x, avg_y),
+            "items": ["double bed with pillows"],
+        })
+    return zones
+
 
 def layout_description_zh(reg: ElementRegistry) -> str:
     """中文结构化布局描述（供用户审阅 / 二次编辑）。"""
@@ -71,20 +123,29 @@ def layout_description_zh(reg: ElementRegistry) -> str:
 
 def build_prompt(reg: ElementRegistry, style: str = "modern cozy hotel room, "
                    "warm wood flooring, white walls, soft natural lighting") -> str:
-    """正向渲染 prompt：布局事实（英文）+ 风格层（可替换）。"""
+    """正向渲染 prompt：空间分区描述（英文）+ 家具列表 + 风格层。"""
     by_cat: dict[str, list] = {}
     for e in reg.elements:
         by_cat.setdefault(e.category, []).append(e)
+
     parts = ["interior design rendering, top-down floor plan perspective",
              "photorealistic, architecturally accurate layout"]
-    for cat in ("客厅", "卧室", "厨房", "卫浴", "走廊通道", "阳台"):
-        for _room in by_cat.get(cat, []):
-            parts.append(_CAT_EN.get(cat, "room"))
-    furn_items = []
+
+    # 空间分区描述（优先）
+    zones = _infer_zones(reg)
+    for z in zones:
+        items_str = " and ".join(z["items"]) if z["items"] else z["zone"]
+        parts.append(f"{z['direction']}: {z['zone']} with {items_str}")
+
+    # 非洁具家具列表
+    bathroom_raw = _BATHROOM_ITEMS | _BEDROOM_ITEMS
+    other_items = []
     for f in by_cat.get("家具", []) + by_cat.get("固定柜", []):
-        furn_items.append(_ITEM_EN.get(f.item, f.item))
-    if furn_items:
-        parts.append("with " + ", ".join(sorted(set(furn_items))))
+        if (f.item or "").lower() not in bathroom_raw:
+            other_items.append(_ITEM_EN.get(f.item, f.item))
+    if other_items:
+        parts.append("with " + ", ".join(sorted(set(other_items))))
+
     if by_cat.get("窗"):
         parts.append(f"{len(by_cat['窗'])} windows with natural light")
     parts.append(style)
