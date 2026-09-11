@@ -12,3 +12,7 @@ e2e.db
 .ruff_cache/
 .mypy_cache/
 third_party/
+.png
+venv/
+output/
+experiments/

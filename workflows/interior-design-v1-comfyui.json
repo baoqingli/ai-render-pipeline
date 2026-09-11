@@ -1,16 +1,55 @@
 {
   "1": {
     "class_type": "CheckpointLoaderSimple",
-    "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" }
+    "inputs": {
+      "ckpt_name": "interiorSceneXL_v1.safetensors"
+    }
+  },
+  "19": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "1",
+        1
+      ],
+      "lora_name": "JJsModernStyle_XL.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0.8
+    }
+  },
+  "20": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "model": [
+        "19",
+        0
+      ],
+      "clip": [
+        "19",
+        1
+      ],
+      "lora_name": "JJsHotel_XL2.safetensors",
+      "strength_model": 0.7,
+      "strength_clip": 0.7
+    }
   },
   "2": {
     "class_type": "LoadImage",
-    "inputs": { "image": "layout.png" }
+    "inputs": {
+      "image": "layout.png"
+    }
   },
   "3": {
     "class_type": "ImageScale",
     "inputs": {
-      "image": ["2", 0],
+      "image": [
+        "2",
+        0
+      ],
       "upscale_method": "lanczos",
       "width": 1024,
       "height": 512,
@@ -19,38 +58,65 @@
   },
   "16": {
     "class_type": "PreviewImage",
-    "inputs": { "images": ["3", 0] }
+    "inputs": {
+      "images": [
+        "3",
+        0
+      ]
+    }
   },
   "4": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "masterpiece, best quality, highres, photorealistic hotel room interior, warm wood flooring, white walls, soft natural lighting, double bed with pillows, wardrobe, tv console, toilet, vanity sink, windows with natural light, architecturally accurate",
-      "clip": ["1", 1]
+      "text": "Modern Style, Hotel Interior, masterpiece, best quality, highres, photorealistic hotel room interior, top-down floor plan perspective, architecturally accurate layout, upper-left: bathroom with toilet and shower stall and vanity sink, center: living area with sofa facing wall-mounted tv console, center-right: two bedrooms each with double bed and pillows, upper-right: small dining area with round table and chairs, warm wood flooring, white walls, soft natural lighting, wardrobe, windows with natural light",
+      "clip": [
+        "20",
+        1
+      ]
     }
   },
   "5": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "easynegative, low quality, blurry, distorted, extra furniture, floating objects, wrong perspective",
-      "clip": ["1", 1]
+      "text": "easynegative, low quality, blurry, distorted, extra furniture, floating objects, wrong perspective, bed in bathroom, bed in toilet area, bed in shower area, bedroom on left side, bedroom style in left zone, sleeping area on left, pillow in bathroom, mattress in bathroom, bedframe in bathroom",
+      "clip": [
+        "20",
+        1
+      ]
     }
   },
   "6": {
     "class_type": "ControlNetLoader",
-    "inputs": { "control_net_name": "xinsir/controlnet-lineart-sdxl-1.0.safetensors" }
+    "inputs": {
+      "control_net_name": "xinsir\\controlnet-lineart-sdxl-1.0.safetensors"
+    }
   },
   "7": {
     "class_type": "ControlNetLoader",
-    "inputs": { "control_net_name": "xinsir/controlnet-depth-sdxl-1.0.safetensors" }
+    "inputs": {
+      "control_net_name": "xinsir\\controlnet-depth-sdxl-1.0.safetensors"
+    }
   },
   "8": {
     "class_type": "ControlNetApplyAdvanced",
     "inputs": {
-      "positive": ["4", 0],
-      "negative": ["5", 0],
-      "control_net": ["6", 0],
-      "image": ["3", 0],
-      "strength": 0.7,
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "control_net": [
+        "6",
+        0
+      ],
+      "image": [
+        "3",
+        0
+      ],
+      "strength": 0.65,
       "start_percent": 0.0,
       "end_percent": 0.8
     }
@@ -58,10 +124,22 @@
   "9": {
     "class_type": "ControlNetApplyAdvanced",
     "inputs": {
-      "positive": ["8", 0],
-      "negative": ["8", 1],
-      "control_net": ["7", 0],
-      "image": ["3", 0],
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "8",
+        1
+      ],
+      "control_net": [
+        "7",
+        0
+      ],
+      "image": [
+        "3",
+        0
+      ],
       "strength": 0.4,
       "start_percent": 0.0,
       "end_percent": 1.0
@@ -70,14 +148,23 @@
   "10": {
     "class_type": "VAEEncode",
     "inputs": {
-      "pixels": ["3", 0],
-      "vae": ["1", 2]
+      "pixels": [
+        "3",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
     }
   },
   "12": {
     "class_type": "RepeatLatentBatch",
     "inputs": {
-      "samples": ["10", 0],
+      "samples": [
+        "10",
+        0
+      ],
       "amount": 4
     }
   },
@@ -90,16 +177,31 @@
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
       "denoise": 0.85,
-      "model": ["1", 0],
-      "positive": ["9", 0],
-      "negative": ["9", 1],
-      "latent_image": ["12", 0]
+      "model": [
+        "20",
+        0
+      ],
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "9",
+        1
+      ],
+      "latent_image": [
+        "12",
+        0
+      ]
     }
   },
   "14": {
     "class_type": "LatentUpscaleBy",
     "inputs": {
-      "samples": ["13", 0],
+      "samples": [
+        "13",
+        0
+      ],
       "upscale_method": "nearest-exact",
       "scale_by": 1.5
     }
@@ -113,24 +215,45 @@
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
       "denoise": 0.45,
-      "model": ["1", 0],
-      "positive": ["9", 0],
-      "negative": ["9", 1],
-      "latent_image": ["14", 0]
+      "model": [
+        "20",
+        0
+      ],
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "9",
+        1
+      ],
+      "latent_image": [
+        "14",
+        0
+      ]
     }
   },
   "17": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["15", 0],
-      "vae": ["1", 2]
+      "samples": [
+        "15",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
     }
   },
   "18": {
     "class_type": "SaveImage",
     "inputs": {
       "filename_prefix": "interior",
-      "images": ["17", 0]
+      "images": [
+        "17",
+        0
+      ]
     }
   }
 }
