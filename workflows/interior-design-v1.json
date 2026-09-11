@@ -1,0 +1,182 @@
+{
+  "comment": "室内设计三模块工作流 v1（SDXL + 双ControlNet + 两阶段放大）",
+  "comment_models": "需要: sd_xl_base_1.0.safetensors / xinsir/controlnet-lineart-sdxl-1.0 / xinsir/controlnet-depth-sdxl-1.0",
+
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "_comment": "模块一: Checkpoint 加载",
+    "inputs": { "ckpt_name": "__CHECKPOINT__" }
+  },
+
+  "2": {
+    "class_type": "LoadImage",
+    "_comment": "输入: CAD布置图线稿（two_agent输出的layout.png）",
+    "inputs": { "image": "__LAYOUT_IMAGE__" }
+  },
+
+  "3": {
+    "class_type": "ImageScale",
+    "_comment": "图像缩放: 统一尺寸，SDXL推荐1024基准（酒店客房宽:高≈2:1）",
+    "inputs": {
+      "image": ["2", 0],
+      "upscale_method": "lanczos",
+      "width": 1024,
+      "height": 512,
+      "crop": "disabled"
+    }
+  },
+
+  "16": {
+    "class_type": "PreviewImage",
+    "_comment": "调试: 预览缩放后的控制图",
+    "inputs": { "images": ["3", 0] }
+  },
+
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "_comment": "正向提示词: Lora触发词 + 质量词 + 家具描述（从prompt.txt填入）",
+    "inputs": {
+      "text": "__POSITIVE__",
+      "clip": ["1", 1]
+    }
+  },
+
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "_comment": "负向提示词",
+    "inputs": {
+      "text": "__NEGATIVE__",
+      "clip": ["1", 1]
+    }
+  },
+
+  "6": {
+    "class_type": "ControlNetLoader",
+    "_comment": "ControlNet① 轮廓保持（线稿/Lineart，对应文档Canny+MLSD）",
+    "inputs": { "control_net_name": "__CONTROLNET_LINEART__" }
+  },
+
+  "7": {
+    "class_type": "ControlNetLoader",
+    "_comment": "ControlNet② 空间深度（对应文档DeepSD/ZOE）",
+    "inputs": { "control_net_name": "__CONTROLNET_DEPTH__" }
+  },
+
+  "8": {
+    "class_type": "ControlNetApplyAdvanced",
+    "_comment": "应用CN①轮廓: 强度0.7，结束时间0.8（保留结构不死板）",
+    "inputs": {
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "control_net": ["6", 0],
+      "image": ["3", 0],
+      "strength": 0.7,
+      "start_percent": 0.0,
+      "end_percent": 0.8
+    }
+  },
+
+  "9": {
+    "class_type": "ControlNetApplyAdvanced",
+    "_comment": "应用CN②深度: 强度0.4（空间纵深感，布置图作深度近似）",
+    "inputs": {
+      "positive": ["8", 0],
+      "negative": ["8", 1],
+      "control_net": ["7", 0],
+      "image": ["3", 0],
+      "strength": 0.4,
+      "start_percent": 0.0,
+      "end_percent": 1.0
+    }
+  },
+
+  "10": {
+    "class_type": "VAEEncode",
+    "_comment": "图生图: 编码布置图为Latent（比空Latent保留更多空间关系）",
+    "inputs": {
+      "pixels": ["3", 0],
+      "vae": ["1", 2]
+    }
+  },
+
+  "11": {
+    "class_type": "LatentUpscaleBy",
+    "_comment": "Latent批次扩展: 一次出4张供挑选",
+    "inputs": {
+      "samples": ["10", 0],
+      "upscale_method": "nearest-exact",
+      "scale_by": 1.0
+    }
+  },
+
+  "12": {
+    "class_type": "RepeatLatentBatch",
+    "_comment": "批次生成4张",
+    "inputs": {
+      "samples": ["11", 0],
+      "amount": 4
+    }
+  },
+
+  "13": {
+    "class_type": "KSampler",
+    "_comment": "模块二: 核心生成（第一阶段）steps=30 cfg=7 DPM++2M Karras",
+    "inputs": {
+      "seed": "__SEED__",
+      "steps": 30,
+      "cfg": 7.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.85,
+      "model": ["1", 0],
+      "positive": ["9", 0],
+      "negative": ["9", 1],
+      "latent_image": ["12", 0]
+    }
+  },
+
+  "14": {
+    "class_type": "LatentUpscaleBy",
+    "_comment": "模块三: Latent放大1.5倍（细节增强前准备）",
+    "inputs": {
+      "samples": ["13", 0],
+      "upscale_method": "nearest-exact",
+      "scale_by": 1.5
+    }
+  },
+
+  "15": {
+    "class_type": "KSampler",
+    "_comment": "模块三: 第二阶段采样（细节增强，低降噪强度保结构）",
+    "inputs": {
+      "seed": "__SEED__",
+      "steps": 20,
+      "cfg": 7.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.45,
+      "model": ["1", 0],
+      "positive": ["9", 0],
+      "negative": ["9", 1],
+      "latent_image": ["14", 0]
+    }
+  },
+
+  "17": {
+    "class_type": "VAEDecode",
+    "_comment": "VAE解码: Latent → 图像",
+    "inputs": {
+      "samples": ["15", 0],
+      "vae": ["1", 2]
+    }
+  },
+
+  "18": {
+    "class_type": "SaveImage",
+    "_comment": "保存输出图像",
+    "inputs": {
+      "filename_prefix": "interior",
+      "images": ["17", 0]
+    }
+  }
+}
