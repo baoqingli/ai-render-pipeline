@@ -53,7 +53,8 @@ class GptImageAgent:
 
     async def run(self, pipeline_out_dir: Path,
                   reference_img: Path | None = None,
-                  prompt: str | None = None) -> list[str]:
+                  prompt: str | None = None,
+                  style_prompt: str | None = None) -> list[str]:
         """读取管线输出目录的 prompt.txt + 布局参考图，生成效果图。
 
         实测结论（2026-09-14，三组对照）：
@@ -64,6 +65,8 @@ class GptImageAgent:
           各听一半，结构反而变差。
         prompt_mode="minimal" 只给转换指令；"file" 读 prompt.txt（可含
           build_prompt 的逐房间描述，供实验对比）。
+        style_prompt: 已编译的风格描述（style_compiler 产出，风格/材质/
+          光照类英文短句），拼在布局指令之后——风格与布局正交，可安全追加。
         返回保存到 out_dir 的图片路径列表。
         """
         pipeline_out_dir = Path(pipeline_out_dir)
@@ -73,6 +76,8 @@ class GptImageAgent:
         prompt = (prompt or MIN_PROMPT_SUFFIX).strip()
         if self.with_reference and "floor plan" not in prompt.lower():
             prompt = f"{prompt}\n{MIN_PROMPT_SUFFIX}"
+        if style_prompt:
+            prompt = f"{prompt}\nStyle: {style_prompt.strip()}"
 
         if self.with_reference:
             layout_img = Path(reference_img) if reference_img \

@@ -36,12 +36,18 @@ async def main() -> None:
     ap.add_argument("--max-iters", type=int, default=3)
     ap.add_argument("--force", action="store_true",
                     help="验证未通过时仍继续生图")
+    ap.add_argument("--style", default=None,
+                    help='自然语言渲染要求，如 "现代简约风，浅色木地板，暖色灯光"'
+                         "（布局类要求会被自动剥离）")
     args = ap.parse_args()
 
     print(f"输入: {args.input}")
+    if args.style:
+        print(f"风格要求: {args.style}")
     r = await run_e2e(args.input, args.out,
                       model=args.model, gpt_model=args.gpt_model,
-                      n=args.n, max_iters=args.max_iters, force=args.force)
+                      n=args.n, max_iters=args.max_iters, force=args.force,
+                      style=args.style)
 
     if not r.ok or r.data is None:
         msg = r.error.message if r.error else "?"

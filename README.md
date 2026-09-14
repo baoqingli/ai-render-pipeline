@@ -13,6 +13,16 @@ uv run python scripts/render_e2e.py \
 - `--input` 支持 DWG / DXF / PNG / JPG（DWG 自动经 ODA 转 DXF；路径用正斜杠）
 - `--out` 是最终渲染图的保存路径（中间产物 layout.png / elements.json / validation.json 写在其父目录）
 - `--force` 验证未通过时仍继续生图（VLM 计数判定有波动，建议常开）
+- `--style` 自然语言渲染要求（任意中文描述，自动译为英文风格词并拼入 prompt）：
+
+```bash
+uv run python scripts/render_e2e.py \
+    --input "d:/me_work/AI/project/ai-render-pipeline/fixtures/cad/01-平面系统图.dwg" \
+    --out output/test1.png --force \
+    --style "渲染风格使用日式原木风，榻榻米元素，暖黄色灯光"
+```
+
+  风格与布局正互不干扰：布局始终由参考图决定，混入的布局类要求（如"改成三室"）会被自动剥离。
 - `--n 4` 一次生成多张；`--model` 切换识图+验证模型（默认 `qwen/qwen3.8-flash`）
 
 渲染图输出示例：`output/test1.png`，全部产物在 `output/renders/`。

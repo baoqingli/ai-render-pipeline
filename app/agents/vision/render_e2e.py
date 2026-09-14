@@ -30,14 +30,18 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
                   max_iters: int = 3,
                   force: bool = False,
                   gpt_model: str | None = None,
-                  n: int = 1) -> ToolResult[dict]:
+                  n: int = 1,
+                  style: str | None = None) -> ToolResult[dict]:
     """一键渲染：识图 → 验证 → gpt-image 生图。
 
     file_path: DWG/DXF（走确定性解析+VLM 增强）或 PNG/JPG（走 CubiCasa 分割）。
     model:     识图+验证模型（缺省回落 ARP_VISION_MODEL）。
     gpt_model: 生图模型（缺省 openai/gpt-image-2.5-sunburst）。
     force:     验证未通过时仍继续生图。
-    返回 ToolResult[dict]：prompt/out_dir/validation/renders。
+    style:     用户自然语言渲染要求（任意语言，如"现代简约风，暖色灯光"）。
+               经风格编译器转为英文风格短句拼入 prompt；布局类要求被剥离
+               （布局由参考图决定）。不影响识图/验证两段。
+    返回 ToolResult[dict]：prompt/out_dir/validation/renders/style_prompt。
     """
     from app.agents.vision.two_agent_pipeline import run as pipeline_run
     from app.engines.gpt_image_agent import GptImageAgent
@@ -84,10 +88,23 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
     from app.engines.gpt_image_agent import DEFAULT_MODEL
     agent = GptImageAgent(api_key=api_key, out_dir=out / "renders",
                           model=gpt_model or DEFAULT_MODEL, n=n)
-    renders = await agent.run(out, reference_img=out / "layout.png")
+
+    # ── Stage 1.5: 风格编译（LLM 调用放线程，避免嵌套事件循环）───────────
+    style_en: str | None = None
+    if style:
+        from app.agents.vision.style_compiler import compile_style
+        style_en = await asyncio.get_event_loop().run_in_executor(
+            None, functools.partial(compile_style, style, model=model))
+        if style_en:
+            (out / "style_prompt.txt").write_text(style_en, encoding="utf-8")
+            print(f"  风格编译: {style_en}")
+
+    renders = await agent.run(out, reference_img=out / "layout.png",
+                              style_prompt=style_en)
 
     data = dict(r.data or {})
     data["renders"] = renders
+    data["style_prompt"] = style_en
     if out_file and renders:
         import shutil
 
