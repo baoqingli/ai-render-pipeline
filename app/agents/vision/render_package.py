@@ -121,35 +121,172 @@ def layout_description_zh(reg: ElementRegistry) -> str:
     return "\n".join(lines)
 
 
+def _room_zones(reg: ElementRegistry) -> list[dict]:
+    """房间边界 → 逐间分区描述，家具按 bbox 中心归属到所在房间。
+
+    返回 [{direction, kind, items}]，按图面位置排序（上→下、左→右），
+    供 build_prompt 生成空间明确的逐间描述。
+    """
+    _ROOM_CATS = ("房间边界", "客厅", "卧室", "厨房", "卫浴", "走廊通道", "阳台")
+    rooms = [e for e in reg.elements
+             if e.category in _ROOM_CATS and e.bbox_pct and len(e.bbox_pct) >= 4]
+    furniture = [e for e in reg.elements
+                 if e.category in ("家具", "固定柜", "设备")
+                 and e.bbox_pct and len(e.bbox_pct) >= 4]
+
+    zones = []
+    for r in rooms:
+        bx0, by0, bx1, by1 = r.bbox_pct
+        inside = []
+        for f in furniture:
+            fx = (f.bbox_pct[0] + f.bbox_pct[2]) / 2
+            fy = (f.bbox_pct[1] + f.bbox_pct[3]) / 2
+            if bx0 <= fx <= bx1 and by0 <= fy <= by1:
+                inside.append(f)
+        kinds = {(f.item or "").lower() for f in inside}
+        if kinds & _BATHROOM_ITEMS:
+            kind = "bathroom"
+        elif kinds & _BEDROOM_ITEMS:
+            kind = "bedroom"
+        elif {"sofa", "tv"} & kinds:
+            kind = "living room"
+        elif {"wardrobe", "cabinet"} & kinds:
+            kind = "walk-in closet"
+        elif r.category in _ITEM_ZH or r.item in _ITEM_ZH:
+            kind = _CAT_EN.get(r.category, "room")
+        else:
+            kind = "room"
+        zones.append({
+            "direction": _quadrant((bx0 + bx1) / 2, (by0 + by1) / 2),
+            "kind": kind,
+            "items": [_ITEM_EN.get(f.item, f.item) for f in inside],
+        })
+    # 稳定排序：上→下、左→右，保证同一 registry 多次生成 prompt 一致
+    _DIR_ORDER = {"upper-left": 0, "upper": 1, "upper-right": 2,
+                  "left": 3, "center": 4, "right": 5,
+                  "lower-left": 6, "lower": 7, "lower-right": 8}
+    zones.sort(key=lambda z: (_DIR_ORDER.get(z["direction"], 9), z["kind"]))
+    return zones
+
+
 def build_prompt(reg: ElementRegistry, style: str = "modern cozy hotel room, "
                    "warm wood flooring, white walls, soft natural lighting") -> str:
-    """正向渲染 prompt：空间分区描述（英文）+ 家具列表 + 风格层。"""
+    """正向渲染 prompt：逐房间空间描述（英文）+ 风格层。
+
+    房间级描述（方位+类型+家具）比全局家具清单更能约束图像模型的
+    空间布局；配合参考图指令可显著提高结构一致性。
+    """
     by_cat: dict[str, list] = {}
     for e in reg.elements:
         by_cat.setdefault(e.category, []).append(e)
 
-    parts = ["interior design rendering, top-down floor plan perspective",
+    parts = ["interior design rendering, top-down dollhouse cutaway view "
+             "of the exact attached floor plan",
+             "STRICTLY preserve the floor plan layout: every wall, room "
+             "division, door and window stays in its planned position, "
+             "do not merge or remove rooms",
              "photorealistic, architecturally accurate layout"]
 
-    # 空间分区描述（优先）
-    zones = _infer_zones(reg)
+    # 逐房间空间描述（家具已归属到房间）
+    zones = _room_zones(reg)
     for z in zones:
-        items_str = " and ".join(z["items"]) if z["items"] else z["zone"]
-        parts.append(f"{z['direction']}: {z['zone']} with {items_str}")
-
-    # 非洁具家具列表
-    bathroom_raw = _BATHROOM_ITEMS | _BEDROOM_ITEMS
-    other_items = []
-    for f in by_cat.get("家具", []) + by_cat.get("固定柜", []):
-        if (f.item or "").lower() not in bathroom_raw:
-            other_items.append(_ITEM_EN.get(f.item, f.item))
-    if other_items:
-        parts.append("with " + ", ".join(sorted(set(other_items))))
+        if z["items"]:
+            items_str = " with " + ", ".join(dict.fromkeys(z["items"]))
+        else:
+            items_str = ""
+        parts.append(f"{z['direction']}: {z['kind']}{items_str}")
 
     if by_cat.get("窗"):
         parts.append(f"{len(by_cat['窗'])} windows with natural light")
+    if by_cat.get("门"):
+        parts.append(f"{len(by_cat['门'])} door openings as planned")
     parts.append(style)
     return ", ".join(dict.fromkeys(parts))   # 去重保序
+
+
+def draw_semantic_reference(reg: ElementRegistry, out_png: str | Path,
+                            width: int = 1536) -> Path:
+    """语义配色俯视参考图（喂 gpt-image 类模型的 image 参数）。
+
+    CAD 全图层渲染（虚线、无填充）对图像模型可读性差；本图按模型易读的
+    方式重画：房间按功能填色、墙体实心黑、家具深灰描边、门窗高亮。
+    坐标变换与 bbox_pct 同向（y-down），保证与 build_prompt 的方位词一致。
+    """
+    from PIL import Image, ImageDraw
+
+    bboxes = [e.world_bbox for e in reg.elements if e.world_bbox]
+    if not bboxes:
+        raise ValueError("registry 无坐标元素")
+    x0 = min(b[0] for b in bboxes)
+    y0 = min(b[1] for b in bboxes)
+    x1 = max(b[2] for b in bboxes)
+    y1 = max(b[3] for b in bboxes)
+    W, H = max(x1 - x0, 1), max(y1 - y0, 1)
+    height = max(int(width * H / W), 1)
+
+    def to_px(wx: float, wy: float) -> tuple[float, float]:
+        return ((wx - x0) / W * width, (1 - (wy - y0) / H) * height)
+
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    dr = ImageDraw.Draw(img)
+
+    # 房间填色（含家具归属分类，逻辑与 _room_zones 一致）
+    _ROOM_CATS = ("房间边界", "客厅", "卧室", "厨房", "卫浴", "走廊通道", "阳台")
+    rooms = [e for e in reg.elements
+             if e.category in _ROOM_CATS and e.world_bbox]
+    furniture = [e for e in reg.elements
+                 if e.category in ("家具", "固定柜", "设备") and e.world_bbox]
+    _FILL = {
+        "bathroom": (198, 224, 244), "bedroom": (208, 234, 202),
+        "living room": (245, 238, 196), "walk-in closet": (226, 212, 240),
+        "kitchen": (247, 220, 190), "hallway": (234, 234, 234),
+        "room": (243, 243, 243),
+    }
+    for r in rooms:
+        bx0, by0, bx1, by1 = r.world_bbox
+        cx_w, cy_w = (bx0 + bx1) / 2, (by0 + by1) / 2
+        inside = [f for f in furniture
+                  if bx0 <= (f.world_bbox[0] + f.world_bbox[2]) / 2 <= bx1
+                  and by0 <= (f.world_bbox[1] + f.world_bbox[3]) / 2 <= by1]
+        kinds = {(f.item or "").lower() for f in inside}
+        if kinds & _BATHROOM_ITEMS:
+            kind = "bathroom"
+        elif kinds & _BEDROOM_ITEMS:
+            kind = "bedroom"
+        elif {"sofa", "tv"} & kinds:
+            kind = "living room"
+        elif {"wardrobe", "cabinet"} & kinds:
+            kind = "walk-in closet"
+        else:
+            kind = _CAT_EN.get(r.category, "room")
+        dr.rectangle([to_px(bx0, by1), to_px(bx1, by0)],
+                     fill=_FILL.get(kind, _FILL["room"]))
+
+    # 家具描边
+    for f in furniture:
+        bx0, by0, bx1, by1 = f.world_bbox
+        dr.rectangle([to_px(bx0, by1), to_px(bx1, by0)],
+                     outline=(95, 95, 95), width=3)
+
+    # 墙体最后画（实心黑，压在填色之上）
+    for w_el in reg.elements:
+        if w_el.category != "墙" or not w_el.world_bbox:
+            continue
+        bx0, by0, bx1, by1 = w_el.world_bbox
+        dr.rectangle([to_px(bx0, by1), to_px(bx1, by0)], fill=(28, 28, 28))
+
+    # 门（橙）窗（蓝）高亮
+    for e in reg.elements:
+        if e.category not in ("门", "窗") or not e.world_bbox:
+            continue
+        bx0, by0, bx1, by1 = e.world_bbox
+        dr.rectangle([to_px(bx0, by1), to_px(bx1, by0)],
+                     fill=(235, 150, 60) if e.category == "门" else (70, 130, 210))
+
+    out = Path(out_png)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(out))
+    return out
 
 
 def draw_control_image(reg: ElementRegistry, out_png: str | Path,

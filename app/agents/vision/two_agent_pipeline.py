@@ -21,18 +21,31 @@ from app.models.vision import ElementRegistry
 
 # ── 识图 Agent ─────────────────────────────────────────────────────────────────
 
-def vision_agent(file_path: str | Path) -> tuple[ElementRegistry, Path]:
+def vision_agent(file_path: str | Path, *,
+                 model: str | None = None) -> tuple[ElementRegistry, Path]:
     """识图：按扩展名分路，返回 (registry, 布局参考图路径)。
 
-    DWG/DXF → 确定性提取 + 渲染全图层布局图；
-    图片    → CubiCasa 分割 + VLM 定标，输入图即布局图。
+    DWG → 先 ODA 转 DXF（内容 hash 缓存，同文件不重转）；
+    DXF → 确定性提取 + 渲染全图层布局图；
+    图片 → CubiCasa 分割 + VLM 定标，输入图即布局图。
     """
     from app.agents.vision.agent_v3 import analyze_dwg, analyze_image
 
     p = Path(file_path)
     suffix = p.suffix.lower()
-    if suffix in (".dwg", ".dxf"):
-        r = analyze_dwg(p)
+    if suffix == ".dwg":
+        # ezdxf 读不了 DWG，先转 DXF（此前直接 readfile 会报 not a DXF file）
+        import asyncio
+
+        from app.tools.cad.convert import convert_dwg
+        r_conv = asyncio.run(convert_dwg(p, p.parent / "_converted"))
+        if not r_conv.ok or r_conv.data is None:
+            msg = r_conv.error.message if r_conv.error else "?"
+            raise RuntimeError(f"DWG 转 DXF 失败（需 ODA File Converter）: {msg}")
+        p = r_conv.data
+        suffix = ".dxf"
+    if suffix == ".dxf":
+        r = analyze_dwg(p, model=model)
         if not r.ok or r.data is None:
             raise RuntimeError(f"识图失败: {r.error.message if r.error else '?'}")
         import ezdxf
@@ -52,7 +65,7 @@ def vision_agent(file_path: str | Path) -> tuple[ElementRegistry, Path]:
         else:
             render_modelspace(doc, model_extent(doc), 1600, out_img)
         return r.data, out_img
-    r = analyze_image(p)
+    r = analyze_image(p, model=model)
     if not r.ok or r.data is None:
         raise RuntimeError(f"识图失败: {r.error.message if r.error else '?'}")
     return r.data, p
@@ -147,7 +160,7 @@ def run(file_path: str | Path, out_dir: str | Path, *,
         vlm_model: str | None = None, max_iters: int = 3) -> ToolResult[dict]:
     """两 Agent 主流程：识图 → 验证 → 通过则出提示词包。"""
     try:
-        registry, layout_png = vision_agent(file_path)
+        registry, layout_png = vision_agent(file_path, model=vlm_model)
     except RuntimeError as e:
         return ToolResult(ok=False, error=ToolError(code="VISION_FAILED",
                                                      message=str(e)))
