@@ -166,7 +166,8 @@ def analyze_image(png_path: str | Path, *, model: str | None = None,
 # ── 路径 A：DWG/DXF → ElementRegistry ────────────────────────────────────────
 
 def analyze_dwg(dxf_path: str | Path, *,
-                use_vlm_understanding: bool = True) -> ToolResult[ElementRegistry]:
+                use_vlm_understanding: bool = True,
+                model: str | None = None) -> ToolResult[ElementRegistry]:
     """矢量路径：parse_scene（实体+HATCH+尺寸链）→ ElementRegistry。
 
     use_vlm_understanding：接入两个关键增强（2026-09-08 实证最优组合，
@@ -196,7 +197,7 @@ def analyze_dwg(dxf_path: str | Path, *,
         if und is None:
             with _cl.suppress(Exception):
                 from app.agents.vision.agent import analyze_drawing
-                r0 = analyze_drawing(str(dxf_path))
+                r0 = analyze_drawing(str(dxf_path), model=model)
                 if r0.ok and r0.data is not None:
                     und = r0.data
         # ② 布置图视口对齐

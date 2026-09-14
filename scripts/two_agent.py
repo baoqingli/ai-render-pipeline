@@ -26,10 +26,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, help="DWG/DXF/图片路径")
     ap.add_argument("--out", required=True, help="输出目录")
+    ap.add_argument("--model", default=None,
+                    help="识图+验证模型（如 qwen/qwen3.8-flash）；默认用 ARP_VISION_MODEL 或配置值")
     ap.add_argument("--max-iters", type=int, default=3)
     args = ap.parse_args()
 
-    r = run(args.input, args.out, max_iters=args.max_iters)
+    r = run(args.input, args.out, vlm_model=args.model, max_iters=args.max_iters)
     if r.ok and r.data:
         d = r.data
         v = d["validation"]
