@@ -12,6 +12,7 @@
 
 保证：合成后遮罩外像素与原图逐位一致（构造性保证，不依赖模型自觉）。
 """
+import asyncio
 import base64
 import json
 import time
@@ -47,6 +48,28 @@ def _data_uri(img_path: Path) -> str:
     return f"data:image/png;base64,{b64}"
 
 
+_TRANSIENT = (429, 502, 503, 504)
+
+
+async def _post_with_retry(http: httpx.AsyncClient, url: str, *,
+                           headers: dict, json_body: dict,
+                           delays: tuple[float, ...] = (5, 15),
+                           label: str = "") -> httpx.Response:
+    """POST + 瞬时错误重试（429/5xx）：OpenRouter 限流与网关抖动常见，
+    质检/定位在链路末端，白跑代价大。"""
+    for attempt in range(len(delays) + 1):
+        resp = await http.post(url, headers=headers, json=json_body)
+        if resp.status_code in _TRANSIENT and attempt < len(delays):
+            wait = delays[attempt]
+            print(f"  瞬时错误 {resp.status_code}（{label}），"
+                  f"{wait}s 后重试（{attempt + 1}/{len(delays)}）…")
+            await asyncio.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp
+    raise RuntimeError(f"unreachable: {url}")  # pragma: no cover
+
+
 class LocalEditAgent:
     def __init__(self, api_key: str, out_dir: Path, *,
                  edit_model: str = DEFAULT_EDIT_MODEL,
@@ -67,18 +90,18 @@ class LocalEditAgent:
                             image_path: Path, target: str) -> list[dict]:
         """返回 [{"label", "bbox_norm", "bbox_px"}]，bbox_px 为像素坐标。"""
         msg = _GROUND_PROMPT.format(instruction=target)
-        resp = await http.post(
-            f"{BASE_URL}/chat/completions",
+        resp = await _post_with_retry(
+            http, f"{BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}",
                      "Content-Type": "application/json"},
-            json={"model": self.vlm_model, "messages": [{
+            json_body={"model": self.vlm_model, "messages": [{
                 "role": "user",
                 "content": [
                     {"type": "image_url",
                      "image_url": {"url": _data_uri(image_path)}},
                     {"type": "text", "text": msg},
                 ]}]},
-        )
+            label="定位")
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"].strip()
         start = content.find("[")
@@ -120,16 +143,16 @@ class LocalEditAgent:
     # ── EditAgent：重生成 + 颜色匹配 + 遮罩合成回贴 ───────────────────────
     async def regenerate(self, http: httpx.AsyncClient,
                          image_path: Path, instruction: str) -> Image.Image:
-        resp = await http.post(
-            f"{BASE_URL}/images",
+        resp = await _post_with_retry(
+            http, f"{BASE_URL}/images",
             headers={"Authorization": f"Bearer {self.api_key}",
                      "Content-Type": "application/json"},
-            json={"model": self.edit_model, "n": 1,
-                  "prompt": _EDIT_PROMPT.format(instruction=instruction),
-                  "input_references": [
-                      {"type": "image_url",
-                       "image_url": {"url": _data_uri(image_path)}}]},
-        )
+            json_body={"model": self.edit_model, "n": 1,
+                       "prompt": _EDIT_PROMPT.format(instruction=instruction),
+                       "input_references": [
+                           {"type": "image_url",
+                            "image_url": {"url": _data_uri(image_path)}}]},
+            label="重生成")
         resp.raise_for_status()
         import base64 as _b64
         raw = _b64.b64decode(resp.json()["data"][0]["b64_json"])
@@ -183,11 +206,11 @@ class LocalEditAgent:
             '"target_intact": true/false, '
             '"outside_changed": true/false, "reason": "一句话"}'
         )
-        resp = await http.post(
-            f"{BASE_URL}/chat/completions",
+        resp = await _post_with_retry(
+            http, f"{BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}",
                      "Content-Type": "application/json"},
-            json={"model": self.vlm_model, "messages": [{
+            json_body={"model": self.vlm_model, "messages": [{
                 "role": "user",
                 "content": [
                     {"type": "image_url",
@@ -196,7 +219,7 @@ class LocalEditAgent:
                      "image_url": {"url": _data_uri(edited)}},
                     {"type": "text", "text": prompt},
                 ]}]},
-        )
+            label="质检")
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"].strip()
         try:
