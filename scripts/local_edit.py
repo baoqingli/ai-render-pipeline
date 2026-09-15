@@ -35,6 +35,8 @@ async def main() -> None:
     ap.add_argument("--edit-model", default=DEFAULT_EDIT_MODEL)
     ap.add_argument("--vlm-model", default=DEFAULT_VLM_MODEL)
     ap.add_argument("--max-retries", type=int, default=2)
+    ap.add_argument("--no-compile", action="store_true",
+                    help="跳过指令编译，直接用原始指令")
     args = ap.parse_args()
 
     s = get_settings()
@@ -51,7 +53,11 @@ async def main() -> None:
         edit_model=args.edit_model, vlm_model=args.vlm_model,
         max_retries=args.max_retries)
     report = await agent.run(Path(args.image), args.instruction,
-                             mask_path=Path(args.mask) if args.mask else None)
+                             mask_path=Path(args.mask) if args.mask else None,
+                             compile_instruction=not args.no_compile)
+    if report.get("instruction_compiled") and \
+            report["instruction_compiled"] != args.instruction:
+        print(f"  编译后指令: {report['instruction_compiled']}")
 
     g = report.get("grounding") or []
     if g:

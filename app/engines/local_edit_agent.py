@@ -14,6 +14,7 @@
 """
 import asyncio
 import base64
+import functools
 import json
 import time
 from pathlib import Path
@@ -253,11 +254,24 @@ class LocalEditAgent:
 
     # ── 主流程 ────────────────────────────────────────────────────────────
     async def run(self, image_path: Path, instruction: str, *,
-                  mask_path: Path | None = None) -> dict:
+                  mask_path: Path | None = None,
+                  compile_instruction: bool = True) -> dict:
         image_path = Path(image_path)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         ts = int(time.time())
         original = Image.open(image_path).convert("RGB")
+
+        # ⓪ 指令编译：负向/模糊表述 → 正向终态描述（失败降级用原文）
+        ins_used = instruction
+        if compile_instruction:
+            from app.agents.vision.edit_compiler import compile_edit_instruction
+            loop = asyncio.get_event_loop()
+            compiled = await loop.run_in_executor(
+                None, functools.partial(compile_edit_instruction, instruction,
+                                        model=self.vlm_model))
+            if compiled and compiled != instruction:
+                ins_used = compiled
+                print(f"  指令编译: {instruction} → {compiled}")
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as http:
             # ① 遮罩：用户文件优先，否则 VLM grounding
@@ -266,10 +280,10 @@ class LocalEditAgent:
                 mask = Image.open(mask_path).convert("L").resize(original.size)
             else:
                 grounding = await self.ground_region(
-                    http, image_path, instruction)
+                    http, image_path, ins_used)
                 if not grounding:
                     raise RuntimeError(
-                        f"未能定位目标（指令: {instruction}）；"
+                        f"未能定位目标（指令: {ins_used}）；"
                         "请提供 --mask 遮罩文件或补充方位词")
                 mask = self.build_mask(original.size,
                                        [g["bbox_px"] for g in grounding])
@@ -278,11 +292,27 @@ class LocalEditAgent:
 
             # ②③ 重生成 → 差异区并集遮罩 → 合成 → 质检，未过重试
             report: dict = {"instruction": instruction,
+                            "instruction_compiled": ins_used,
                             "grounding": grounding,
                             "mask": str(mask_path_out), "retries": []}
             edited_path = self.out_dir / f"edited_{ts}.png"
             for attempt in range(self.max_retries + 1):
-                regen = await self.regenerate(http, image_path, instruction)
+                if attempt > 0:
+                    # 失败原因驱动再改写：让重试指令更明确、改动可见
+                    reason = (report["retries"][-1]["verify"].get("reason", "")
+                              if report["retries"] else "")
+                    from app.agents.vision.edit_compiler import (
+                        compile_edit_instruction)
+                    loop = asyncio.get_event_loop()
+                    recompiled = await loop.run_in_executor(
+                        None, functools.partial(
+                            compile_edit_instruction, instruction,
+                            model=self.vlm_model, failure_reason=reason))
+                    if recompiled and recompiled != instruction:
+                        ins_used = recompiled
+                        report["retries"][-1]["instruction"] = recompiled
+                        print(f"  重试指令改写: {recompiled}")
+                regen = await self.regenerate(http, image_path, ins_used)
                 if not mask_path:
                     # 模型实际改动区（含移动落点）并进遮罩；用户手遮罩不扩张
                     m2 = self.diff_mask(original, regen)
