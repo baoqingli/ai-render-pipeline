@@ -175,9 +175,12 @@ class LocalEditAgent:
                      edited: Path, instruction: str) -> dict:
         prompt = (
             "图1是原图，图2是局部编辑后的图。编辑指令：" f"{instruction}\n"
-            "检查两点：1) 指令是否已达成；2) 指令目标之外的区域（墙体布局、"
-            "其他家具、门窗位置）是否保持不变（光照细微差异不算）。"
+            "严格检查三点：1) 指令是否已完整达成；2) 被编辑的目标物体是否"
+            "完整自然——无残影、无截断、无重影、无纹理错乱；3) 目标之外的"
+            "区域（墙体布局、其他家具、门窗位置）是否保持不变（光照细微"
+            "差异不算）。"
             '只输出 JSON：{"instruction_fulfilled": true/false, '
+            '"target_intact": true/false, '
             '"outside_changed": true/false, "reason": "一句话"}'
         )
         resp = await http.post(
@@ -206,6 +209,25 @@ class LocalEditAgent:
         return {"instruction_fulfilled": None, "outside_changed": None,
                 "reason": f"verify 输出不可解析: {content[:120]}"}
 
+    @staticmethod
+    def diff_mask(original: Image.Image, edited: Image.Image,
+                  threshold: float = 22.0) -> Image.Image:
+        """原图 vs 重生成图的显著差异区遮罩（L 模式）。
+
+        移动类指令中，模型实际改动的位置 = 源区域（搬空）+ 目标区域（放入），
+        两处都必然与原图差异显著——用差异区并进遮罩，自动覆盖移动的落点，
+        不依赖指令类型判断。全局色调漂移由 threshold 滤掉，小噪点由中值滤
+        波清除。
+        """
+        a = np.asarray(original, dtype=np.int16)
+        b = np.asarray(edited.resize(original.size), dtype=np.int16)
+        diff = np.abs(a - b).mean(axis=2)
+        change = (diff > threshold).astype(np.uint8) * 255
+        m = Image.fromarray(change, mode="L")
+        m = m.filter(ImageFilter.MedianFilter(9))       # 去孤立噪点
+        m = m.filter(ImageFilter.MaxFilter(15))          # 膨胀，补物体边缘
+        return m
+
     # ── 主流程 ────────────────────────────────────────────────────────────
     async def run(self, image_path: Path, instruction: str, *,
                   mask_path: Path | None = None) -> dict:
@@ -216,9 +238,9 @@ class LocalEditAgent:
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as http:
             # ① 遮罩：用户文件优先，否则 VLM grounding
+            grounding: list[dict] = []
             if mask_path:
                 mask = Image.open(mask_path).convert("L").resize(original.size)
-                grounding: list[dict] = []
             else:
                 grounding = await self.ground_region(
                     http, image_path, instruction)
@@ -231,19 +253,28 @@ class LocalEditAgent:
             mask_path_out = self.out_dir / f"mask_{ts}.png"
             mask.save(mask_path_out)
 
-            # ②③ 重生成 → 合成 → 质检，未过重试
+            # ②③ 重生成 → 差异区并集遮罩 → 合成 → 质检，未过重试
             report: dict = {"instruction": instruction,
                             "grounding": grounding,
                             "mask": str(mask_path_out), "retries": []}
             edited_path = self.out_dir / f"edited_{ts}.png"
             for attempt in range(self.max_retries + 1):
                 regen = await self.regenerate(http, image_path, instruction)
+                if not mask_path:
+                    # 模型实际改动区（含移动落点）并进遮罩；用户手遮罩不扩张
+                    m2 = self.diff_mask(original, regen)
+                    mask = Image.fromarray(np.maximum(
+                        np.asarray(mask), np.asarray(m2)), mode="L")
+                    mask = mask.filter(
+                        ImageFilter.GaussianBlur(self.feather_px))
+                    mask.save(mask_path_out)
                 composed = self.composite(original, regen, mask)
                 composed.save(edited_path)
                 v = await self.verify(http, image_path, edited_path,
                                       instruction)
                 report["verify"] = v
                 ok = (v.get("instruction_fulfilled") is True
+                      and v.get("target_intact", True) is True
                       and v.get("outside_changed") is not True)
                 report["attempts"] = attempt + 1
                 if ok or attempt == self.max_retries:
