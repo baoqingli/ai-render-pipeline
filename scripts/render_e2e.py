@@ -27,7 +27,10 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True,
                     help="DWG/DXF/PNG/JPG 路径")
-    ap.add_argument("--out", required=True, help="输出目录")
+    ap.add_argument("--out", default="output",
+                    help="输出根目录（默认 output）；实际产物落在 "
+                         "<根>/<日期>/<运行时分秒>/，最终成品图为该目录下 "
+                         "final.png")
     ap.add_argument("--model", default=None,
                     help="识图+验证模型（如 qwen/qwen3.8-flash）")
     ap.add_argument("--gpt-model", default=None,

@@ -172,6 +172,10 @@ def run(file_path: str | Path, out_dir: str | Path, *,
         json.dumps(val, ensure_ascii=False, indent=1), encoding="utf-8")
     (out / "elements.json").write_text(registry.model_dump_json(indent=1),
                                         encoding="utf-8")
+    # layout.png 无论验证过没过都落运行目录——后续生图/--force 续跑都需要它
+    import shutil as _shutil
+
+    _shutil.copy2(layout_png, out / "layout.png")
     if not val["passed"]:
         return ToolResult(ok=False, error=ToolError(
             code="VALIDATION_FAILED",

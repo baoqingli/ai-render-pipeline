@@ -29,7 +29,9 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", required=True, help="原图路径")
     ap.add_argument("--instruction", required=True, help="局部调整指令")
-    ap.add_argument("--out", required=True, help="产物目录")
+    ap.add_argument("--out", default=None,
+                    help="产物目录（缺省=被编辑图片的同目录，遮罩/结果/"
+                         "报告都落在那里）")
     ap.add_argument("--mask", default=None,
                     help="遮罩文件（L 模式，白=可编辑）；缺省走 VLM 定位")
     ap.add_argument("--edit-model", default=DEFAULT_EDIT_MODEL)
@@ -48,8 +50,11 @@ async def main() -> None:
     print(f"原图: {args.image}")
     print(f"指令: {args.instruction}")
 
+    # 产物默认与被编辑图片同目录
+    out_dir = Path(args.out) if args.out else Path(args.image).parent
+
     agent = LocalEditAgent(
-        api_key=api_key, out_dir=Path(args.out),
+        api_key=api_key, out_dir=out_dir,
         edit_model=args.edit_model, vlm_model=args.vlm_model,
         max_retries=args.max_retries)
     report = await agent.run(Path(args.image), args.instruction,
@@ -72,12 +77,12 @@ async def main() -> None:
         v.get("outside_changed") is not True
     print(f"  质检: {'通过' if ok else '未确认'} ({v.get('reason', '-')})")
     print(f"  结果: {report['edited']}")
-    print(f"  产物目录: {Path(args.out).resolve()}")
-    # 链式迭代提示：看过图不满意时复制即用
+    print(f"  产物目录: {out_dir.resolve()}")
+    # 链式迭代提示：产物与源图同目录，改指令即可继续
     print("\n看过图不满意？继续调整（复制改指令即用）:")
     print(f'  uv run python scripts/local_edit.py --image '
           f'"{report["edited"]}" '
-          f'--instruction "<下一处调整>" --out {Path(args.out) / "v2"}')
+          f'--instruction "<下一处调整>" --out "{out_dir}"')
 
 
 if __name__ == "__main__":
