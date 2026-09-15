@@ -301,7 +301,7 @@ class LocalEditAgent:
                             "instruction_compiled": ins_used,
                             "grounding": grounding,
                             "mask": str(mask_path_out), "retries": []}
-            edited_path = self.out_dir / f"edited_{ts}.png"
+            edited_path = self.out_dir / f"update_{ts}.png"
             for attempt in range(self.max_retries + 1):
                 if attempt > 0:
                     # 失败原因驱动再改写：让重试指令更明确、改动可见
