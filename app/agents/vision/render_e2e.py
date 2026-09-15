@@ -30,14 +30,24 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
                   max_iters: int = 3,
                   force: bool = False,
                   gpt_model: str | None = None,
-                  n: int = 1) -> ToolResult[dict]:
-    """一键渲染：识图 → 验证 → gpt-image 生图。
+                  n: int = 1,
+                  desc: str | None = None,
+                  edit: str | list[str] | None = None) -> ToolResult[dict]:
+    """一键渲染：识图 → 验证 → gpt-image 生图 →（可选）局部编辑。
 
     file_path: DWG/DXF（走确定性解析+VLM 增强）或 PNG/JPG（走 CubiCasa 分割）。
     model:     识图+验证模型（缺省回落 ARP_VISION_MODEL）。
     gpt_model: 生图模型（缺省 openai/gpt-image-2.5-sunburst）。
     force:     验证未通过时仍继续生图。
-    返回 ToolResult[dict]：prompt/out_dir/validation/renders。
+    desc:      用户自然语言生图描述（任意语言自由输入——风格/材质/光照/
+               氛围/家具偏好/夜景等）。经描述编译器识别生图相关内容并转
+               英文拼入 prompt；布局类要求与无关内容被剥离（布局由参考图
+               决定）。不影响识图/验证两段。
+    edit:      出图后的局部编辑指令（str 或多条 list[str] 串行迭代），
+               仅修改指令目标区域，其余像素构造性保持不变（局部重绘
+               Agent，docs/local-edit-agent-plan-2026-09.md）。
+    返回 ToolResult[dict]：prompt/out_dir/validation/renders/desc_prompt/
+               edited/edit_reports。
     """
     from app.agents.vision.two_agent_pipeline import run as pipeline_run
     from app.engines.gpt_image_agent import GptImageAgent
@@ -84,14 +94,52 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
     from app.engines.gpt_image_agent import DEFAULT_MODEL
     agent = GptImageAgent(api_key=api_key, out_dir=out / "renders",
                           model=gpt_model or DEFAULT_MODEL, n=n)
-    renders = await agent.run(out, reference_img=out / "layout.png")
+
+    # ── Stage 1.5: 描述编译（LLM 调用放线程，避免嵌套事件循环）───────────
+    desc_en: str | None = None
+    if desc:
+        from app.agents.vision.desc_compiler import compile_desc
+        desc_en = await asyncio.get_event_loop().run_in_executor(
+            None, functools.partial(compile_desc, desc, model=model))
+        if desc_en:
+            (out / "desc_prompt.txt").write_text(desc_en, encoding="utf-8")
+            print(f"  描述编译: {desc_en}")
+        else:
+            print("  描述编译: 无生图相关内容，使用默认渲染")
+
+    renders = await agent.run(out, reference_img=out / "layout.png",
+                              desc_prompt=desc_en)
 
     data = dict(r.data or {})
     data["renders"] = renders
-    if out_file and renders:
+    data["desc_prompt"] = desc_en
+
+    # ── Stage 3: 局部编辑（串行迭代，每次以上一次产物为基图）───────────────
+    final_image: Path | None = Path(renders[0]) if renders else None
+    if edit and final_image:
+        from app.engines.local_edit_agent import LocalEditAgent
+        edits = [edit] if isinstance(edit, str) else list(edit)
+        editor = LocalEditAgent(api_key=api_key, out_dir=out / "edits",
+                                edit_model=gpt_model or DEFAULT_MODEL)
+        edit_reports = []
+        for i, ins in enumerate(edits, 1):
+            print(f"  局部编辑 {i}/{len(edits)}: {ins}")
+            rep = await editor.run(final_image, ins)
+            final_image = Path(rep["edited"])
+            edit_reports.append(rep)
+            v = rep.get("verify", {})
+            ok = v.get("instruction_fulfilled") is True and \
+                v.get("target_intact", True) is True and \
+                v.get("outside_changed") is not True
+            print(f"    质检: {'通过' if ok else '未确认'}"
+                  f"（{v.get('reason', '-')}）")
+        data["edited"] = str(final_image)
+        data["edit_reports"] = edit_reports
+
+    if out_file and final_image:
         import shutil
 
-        shutil.copy2(renders[0], out_file)
+        shutil.copy2(final_image, out_file)
         data["render_file"] = str(out_file)
     return ToolResult(ok=True, data=data)
 

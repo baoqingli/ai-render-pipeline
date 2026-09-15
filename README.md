@@ -13,6 +13,45 @@ uv run python scripts/render_e2e.py \
 - `--input` 支持 DWG / DXF / PNG / JPG（DWG 自动经 ODA 转 DXF；路径用正斜杠）
 - `--out` 是最终渲染图的保存路径（中间产物 layout.png / elements.json / validation.json 写在其父目录）
 - `--force` 验证未通过时仍继续生图（VLM 计数判定有波动，建议常开）
+- `--desc` 自然语言生图描述（自由输入：风格/材质/配色/光照/氛围/家具偏好/夜景等，自动识别生图相关内容并译为英文拼入 prompt）：
+
+```bash
+uv run python scripts/render_e2e.py \
+    --input "d:/me_work/AI/project/ai-render-pipeline/fixtures/cad/01-平面系统图.dwg" \
+    --out output/test1.png --force \
+    --desc "渲染风格使用日式原木风，榻榻米元素，暖黄色灯光"
+```
+
+  描述与布局互不干扰。三类内容自动识别：
+  - 效果描述（风格/材质/光照/氛围/家具）→ 保留
+  - 空间状态陈述（"玄关上面是淋浴间"）→ 保留，帮助模型正确解读参考图
+  - 布局改动要求（"改成三室""卧室放大"）与无关闲聊 → 剥离，布局由参考图决定
+  纯改动输入则回落默认渲染。
+- `--edit` 出图后的局部编辑指令（可多次传入串行执行），只改目标区域、
+  其余像素严格不变（定位→重生成→遮罩合成回贴→质检，详见
+  [局部重绘设计](docs/local-edit-agent-plan-2026-09.md)）：
+
+```bash
+uv run python scripts/render_e2e.py \
+    --input "d:/me_work/AI/project/ai-render-pipeline/fixtures/cad/01-平面系统图.dwg" \
+    --out output/test_full.png --force \
+    --desc "现代简约风，浅色木地板，暖色灯光" \
+    --edit "把地毯上的圆形茶几换成方形黑色茶几" \
+    --edit "删掉中央的布艺沙发"
+```
+
+  也可对任意已有渲染图单独做局部编辑：`scripts/local_edit.py --image <图> --instruction <指令> --out <目录>`
+
+**推荐工作流（人在回路）**：出图后先人工检查，发现问题再逐处局部修——
+
+```bash
+# 1. 出图（不带 --edit）
+uv run python scripts/render_e2e.py --input "xxx.dwg" --out output/test_full.png --force
+# 2. 看图后局部修（每次一条命令，产物路径会打印，链式迭代即可）
+uv run python scripts/local_edit.py --image output/test_full.png \
+    --instruction "沙发离墙太远，往上移" --out output/e1
+# 3. 看 output/e1/edited_*.png，继续修下一处
+```
 - `--n 4` 一次生成多张；`--model` 切换识图+验证模型（默认 `qwen/qwen3.8-flash`）
 
 渲染图输出示例：`output/test1.png`，全部产物在 `output/renders/`。
