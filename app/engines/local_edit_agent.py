@@ -12,7 +12,9 @@
 
 保证：合成后遮罩外像素与原图逐位一致（构造性保证，不依赖模型自觉）。
 """
+import asyncio
 import base64
+import functools
 import json
 import time
 from pathlib import Path
@@ -36,15 +38,39 @@ _GROUND_PROMPT = (
 _EDIT_PROMPT = (
     "Apply this exact modification to the interior rendering: "
     "{instruction}. Render the modified object realistically, consistent "
-    "with the scene's perspective and lighting. Keep everything else "
-    "identical: room layout, camera angle, walls, flooring, and all other "
-    "furniture and objects."
+    "with the scene's perspective and lighting. Only the objects the "
+    "instruction explicitly names may change or move. Everything NOT "
+    "named in the instruction — including fixed fixtures (sink/vanity, "
+    "toilet, other doors, windows, walls) and all other furniture — must "
+    "stay EXACTLY in their original positions, shapes and style."
 )
 
 
 def _data_uri(img_path: Path) -> str:
     b64 = base64.b64encode(img_path.read_bytes()).decode()
     return f"data:image/png;base64,{b64}"
+
+
+_TRANSIENT = (429, 502, 503, 504)
+
+
+async def _post_with_retry(http: httpx.AsyncClient, url: str, *,
+                           headers: dict, json_body: dict,
+                           delays: tuple[float, ...] = (5, 15),
+                           label: str = "") -> httpx.Response:
+    """POST + 瞬时错误重试（429/5xx）：OpenRouter 限流与网关抖动常见，
+    质检/定位在链路末端，白跑代价大。"""
+    for attempt in range(len(delays) + 1):
+        resp = await http.post(url, headers=headers, json=json_body)
+        if resp.status_code in _TRANSIENT and attempt < len(delays):
+            wait = delays[attempt]
+            print(f"  瞬时错误 {resp.status_code}（{label}），"
+                  f"{wait}s 后重试（{attempt + 1}/{len(delays)}）…")
+            await asyncio.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp
+    raise RuntimeError(f"unreachable: {url}")  # pragma: no cover
 
 
 class LocalEditAgent:
@@ -67,18 +93,18 @@ class LocalEditAgent:
                             image_path: Path, target: str) -> list[dict]:
         """返回 [{"label", "bbox_norm", "bbox_px"}]，bbox_px 为像素坐标。"""
         msg = _GROUND_PROMPT.format(instruction=target)
-        resp = await http.post(
-            f"{BASE_URL}/chat/completions",
+        resp = await _post_with_retry(
+            http, f"{BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}",
                      "Content-Type": "application/json"},
-            json={"model": self.vlm_model, "messages": [{
+            json_body={"model": self.vlm_model, "messages": [{
                 "role": "user",
                 "content": [
                     {"type": "image_url",
                      "image_url": {"url": _data_uri(image_path)}},
                     {"type": "text", "text": msg},
                 ]}]},
-        )
+            label="定位")
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"].strip()
         start = content.find("[")
@@ -120,16 +146,16 @@ class LocalEditAgent:
     # ── EditAgent：重生成 + 颜色匹配 + 遮罩合成回贴 ───────────────────────
     async def regenerate(self, http: httpx.AsyncClient,
                          image_path: Path, instruction: str) -> Image.Image:
-        resp = await http.post(
-            f"{BASE_URL}/images",
+        resp = await _post_with_retry(
+            http, f"{BASE_URL}/images",
             headers={"Authorization": f"Bearer {self.api_key}",
                      "Content-Type": "application/json"},
-            json={"model": self.edit_model, "n": 1,
-                  "prompt": _EDIT_PROMPT.format(instruction=instruction),
-                  "input_references": [
-                      {"type": "image_url",
-                       "image_url": {"url": _data_uri(image_path)}}]},
-        )
+            json_body={"model": self.edit_model, "n": 1,
+                       "prompt": _EDIT_PROMPT.format(instruction=instruction),
+                       "input_references": [
+                           {"type": "image_url",
+                            "image_url": {"url": _data_uri(image_path)}}]},
+            label="重生成")
         resp.raise_for_status()
         import base64 as _b64
         raw = _b64.b64decode(resp.json()["data"][0]["b64_json"])
@@ -175,19 +201,23 @@ class LocalEditAgent:
                      edited: Path, instruction: str) -> dict:
         prompt = (
             "图1是原图，图2是局部编辑后的图。编辑指令：" f"{instruction}\n"
-            "严格检查三点：1) 指令是否已完整达成；2) 被编辑的目标物体是否"
+            "严格检查四点：1) 指令是否已完整达成；2) 被编辑的目标物体是否"
             "完整自然——无残影、无截断、无重影、无纹理错乱；3) 目标之外的"
-            "区域（墙体布局、其他家具、门窗位置）是否保持不变（光照细微"
-            "差异不算）。"
+            "区域（其他家具、装饰）是否保持不变（光照细微差异不算）；"
+            "4) 所有未被指令要求变动的物体与设施（家具、床、沙发、绿植、"
+            "洗手池/台盆、马桶、门、窗、墙体等一切对象）的位置、朝向和形态"
+            "是否与原图完全一致——任何未被要求的移动、变形都算失败；"
+            "指令明确要求改动或移动的对象按指令要求判断该项。"
             '只输出 JSON：{"instruction_fulfilled": true/false, '
             '"target_intact": true/false, '
-            '"outside_changed": true/false, "reason": "一句话"}'
+            '"outside_changed": true/false, '
+            '"fixtures_moved": true/false, "reason": "一句话"}'
         )
-        resp = await http.post(
-            f"{BASE_URL}/chat/completions",
+        resp = await _post_with_retry(
+            http, f"{BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}",
                      "Content-Type": "application/json"},
-            json={"model": self.vlm_model, "messages": [{
+            json_body={"model": self.vlm_model, "messages": [{
                 "role": "user",
                 "content": [
                     {"type": "image_url",
@@ -196,7 +226,7 @@ class LocalEditAgent:
                      "image_url": {"url": _data_uri(edited)}},
                     {"type": "text", "text": prompt},
                 ]}]},
-        )
+            label="质检")
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"].strip()
         try:
@@ -230,11 +260,24 @@ class LocalEditAgent:
 
     # ── 主流程 ────────────────────────────────────────────────────────────
     async def run(self, image_path: Path, instruction: str, *,
-                  mask_path: Path | None = None) -> dict:
+                  mask_path: Path | None = None,
+                  compile_instruction: bool = True) -> dict:
         image_path = Path(image_path)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         ts = int(time.time())
         original = Image.open(image_path).convert("RGB")
+
+        # ⓪ 指令编译：负向/模糊表述 → 正向终态描述（失败降级用原文）
+        ins_used = instruction
+        if compile_instruction:
+            from app.agents.vision.edit_compiler import compile_edit_instruction
+            loop = asyncio.get_event_loop()
+            compiled = await loop.run_in_executor(
+                None, functools.partial(compile_edit_instruction, instruction,
+                                        model=self.vlm_model))
+            if compiled and compiled != instruction:
+                ins_used = compiled
+                print(f"  指令编译: {instruction} → {compiled}")
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as http:
             # ① 遮罩：用户文件优先，否则 VLM grounding
@@ -243,10 +286,10 @@ class LocalEditAgent:
                 mask = Image.open(mask_path).convert("L").resize(original.size)
             else:
                 grounding = await self.ground_region(
-                    http, image_path, instruction)
+                    http, image_path, ins_used)
                 if not grounding:
                     raise RuntimeError(
-                        f"未能定位目标（指令: {instruction}）；"
+                        f"未能定位目标（指令: {ins_used}）；"
                         "请提供 --mask 遮罩文件或补充方位词")
                 mask = self.build_mask(original.size,
                                        [g["bbox_px"] for g in grounding])
@@ -255,11 +298,27 @@ class LocalEditAgent:
 
             # ②③ 重生成 → 差异区并集遮罩 → 合成 → 质检，未过重试
             report: dict = {"instruction": instruction,
+                            "instruction_compiled": ins_used,
                             "grounding": grounding,
                             "mask": str(mask_path_out), "retries": []}
             edited_path = self.out_dir / f"edited_{ts}.png"
             for attempt in range(self.max_retries + 1):
-                regen = await self.regenerate(http, image_path, instruction)
+                if attempt > 0:
+                    # 失败原因驱动再改写：让重试指令更明确、改动可见
+                    reason = (report["retries"][-1]["verify"].get("reason", "")
+                              if report["retries"] else "")
+                    from app.agents.vision.edit_compiler import (
+                        compile_edit_instruction)
+                    loop = asyncio.get_event_loop()
+                    recompiled = await loop.run_in_executor(
+                        None, functools.partial(
+                            compile_edit_instruction, instruction,
+                            model=self.vlm_model, failure_reason=reason))
+                    if recompiled and recompiled != instruction:
+                        ins_used = recompiled
+                        report["retries"][-1]["instruction"] = recompiled
+                        print(f"  重试指令改写: {recompiled}")
+                regen = await self.regenerate(http, image_path, ins_used)
                 if not mask_path:
                     # 模型实际改动区（含移动落点）并进遮罩；用户手遮罩不扩张
                     m2 = self.diff_mask(original, regen)
@@ -275,7 +334,8 @@ class LocalEditAgent:
                 report["verify"] = v
                 ok = (v.get("instruction_fulfilled") is True
                       and v.get("target_intact", True) is True
-                      and v.get("outside_changed") is not True)
+                      and v.get("outside_changed") is not True
+                      and v.get("fixtures_moved", False) is not True)
                 report["attempts"] = attempt + 1
                 if ok or attempt == self.max_retries:
                     break

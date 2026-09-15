@@ -40,7 +40,10 @@ uv run python scripts/render_e2e.py \
     --edit "删掉中央的布艺沙发"
 ```
 
-  也可对任意已有渲染图单独做局部编辑：`scripts/local_edit.py --image <图> --instruction <指令> --out <目录>`
+  也可对任意已有渲染图单独做局部编辑：`scripts/local_edit.py --image <图> --instruction <指令> --out <目录>`。
+  指令会自动编译为正向终态描述（模糊/负向说法也能用，如"去掉封闭部分"会
+  被改写成具体的样子描述）；`--no-compile` 可跳过。质检未过自动带失败原因
+  改写指令重试。
 
 **推荐工作流（人在回路）**：出图后先人工检查，发现问题再逐处局部修——
 
