@@ -62,10 +62,16 @@ async def main() -> None:
         print("  定位: 使用用户提供的遮罩")
     v = report.get("verify", {})
     ok = v.get("instruction_fulfilled") is True and \
+        v.get("target_intact", True) is True and \
         v.get("outside_changed") is not True
     print(f"  质检: {'通过' if ok else '未确认'} ({v.get('reason', '-')})")
     print(f"  结果: {report['edited']}")
     print(f"  产物目录: {Path(args.out).resolve()}")
+    # 链式迭代提示：看过图不满意时复制即用
+    print("\n看过图不满意？继续调整（复制改指令即用）:")
+    print(f'  uv run python scripts/local_edit.py --image '
+          f'"{report["edited"]}" '
+          f'--instruction "<下一处调整>" --out {Path(args.out) / "v2"}')
 
 
 if __name__ == "__main__":

@@ -41,6 +41,17 @@ uv run python scripts/render_e2e.py \
 ```
 
   也可对任意已有渲染图单独做局部编辑：`scripts/local_edit.py --image <图> --instruction <指令> --out <目录>`
+
+**推荐工作流（人在回路）**：出图后先人工检查，发现问题再逐处局部修——
+
+```bash
+# 1. 出图（不带 --edit）
+uv run python scripts/render_e2e.py --input "xxx.dwg" --out output/test_full.png --force
+# 2. 看图后局部修（每次一条命令，产物路径会打印，链式迭代即可）
+uv run python scripts/local_edit.py --image output/test_full.png \
+    --instruction "沙发离墙太远，往上移" --out output/e1
+# 3. 看 output/e1/edited_*.png，继续修下一处
+```
 - `--n 4` 一次生成多张；`--model` 切换识图+验证模型（默认 `qwen/qwen3.8-flash`）
 
 渲染图输出示例：`output/test1.png`，全部产物在 `output/renders/`。
