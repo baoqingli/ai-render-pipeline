@@ -27,6 +27,20 @@ uv run python scripts/render_e2e.py \
   - 空间状态陈述（"玄关上面是淋浴间"）→ 保留，帮助模型正确解读参考图
   - 布局改动要求（"改成三室""卧室放大"）与无关闲聊 → 剥离，布局由参考图决定
   纯改动输入则回落默认渲染。
+- `--edit` 出图后的局部编辑指令（可多次传入串行执行），只改目标区域、
+  其余像素严格不变（定位→重生成→遮罩合成回贴→质检，详见
+  [局部重绘设计](docs/local-edit-agent-plan-2026-09.md)）：
+
+```bash
+uv run python scripts/render_e2e.py \
+    --input "d:/me_work/AI/project/ai-render-pipeline/fixtures/cad/01-平面系统图.dwg" \
+    --out output/test_full.png --force \
+    --desc "现代简约风，浅色木地板，暖色灯光" \
+    --edit "把地毯上的圆形茶几换成方形黑色茶几" \
+    --edit "删掉中央的布艺沙发"
+```
+
+  也可对任意已有渲染图单独做局部编辑：`scripts/local_edit.py --image <图> --instruction <指令> --out <目录>`
 - `--n 4` 一次生成多张；`--model` 切换识图+验证模型（默认 `qwen/qwen3.8-flash`）
 
 渲染图输出示例：`output/test1.png`，全部产物在 `output/renders/`。

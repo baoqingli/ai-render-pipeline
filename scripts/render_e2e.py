@@ -39,6 +39,9 @@ async def main() -> None:
     ap.add_argument("--desc", default=None,
                     help='自然语言生图描述（风格/材质/光照/氛围/家具偏好/夜景等，'
                          '自由输入）；布局类要求会被自动剥离')
+    ap.add_argument("--edit", action="append", default=None,
+                    help='出图后的局部编辑指令，可多次传入串行执行，如'
+                         ' --edit "把沙发换成深绿色" --edit "删掉绿色扶手椅"')
     args = ap.parse_args()
 
     print(f"输入: {args.input}")
@@ -47,7 +50,7 @@ async def main() -> None:
     r = await run_e2e(args.input, args.out,
                       model=args.model, gpt_model=args.gpt_model,
                       n=args.n, max_iters=args.max_iters, force=args.force,
-                      desc=args.desc)
+                      desc=args.desc, edit=args.edit)
 
     if not r.ok or r.data is None:
         msg = r.error.message if r.error else "?"
@@ -60,6 +63,8 @@ async def main() -> None:
         print(f"  验证轮{rd['iter']}: {rd['checks']}  修正={rd['fixes']}")
     print(f"  验证: {'通过' if d['validation']['passed'] else '未通过(--force)'}")
     print(f"  渲染图: {len(d['renders'])} 张 → {d['renders']}")
+    if d.get("edited"):
+        print(f"  最终图（含局部编辑）: {d['edited']}")
     print(f"\n输出目录: {Path(d['out_dir']).resolve()}")
 
 
