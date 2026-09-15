@@ -38,9 +38,11 @@ _GROUND_PROMPT = (
 _EDIT_PROMPT = (
     "Apply this exact modification to the interior rendering: "
     "{instruction}. Render the modified object realistically, consistent "
-    "with the scene's perspective and lighting. Keep everything else "
-    "identical: room layout, camera angle, walls, flooring, and all other "
-    "furniture and objects."
+    "with the scene's perspective and lighting. Only the objects the "
+    "instruction explicitly names may change or move. Everything NOT "
+    "named in the instruction — including fixed fixtures (sink/vanity, "
+    "toilet, other doors, windows, walls) and all other furniture — must "
+    "stay EXACTLY in their original positions, shapes and style."
 )
 
 
@@ -199,13 +201,16 @@ class LocalEditAgent:
                      edited: Path, instruction: str) -> dict:
         prompt = (
             "图1是原图，图2是局部编辑后的图。编辑指令：" f"{instruction}\n"
-            "严格检查三点：1) 指令是否已完整达成；2) 被编辑的目标物体是否"
+            "严格检查四点：1) 指令是否已完整达成；2) 被编辑的目标物体是否"
             "完整自然——无残影、无截断、无重影、无纹理错乱；3) 目标之外的"
-            "区域（墙体布局、其他家具、门窗位置）是否保持不变（光照细微"
-            "差异不算）。"
+            "区域（其他家具、装饰）是否保持不变（光照细微差异不算）；"
+            "4) 未被指令提及的固定设施（洗手池/台盆、马桶、门、窗、墙体）"
+            "的位置和朝向是否与原图完全一致——任何未被要求的移动、变形都算"
+            "失败；若指令明确要求改动某固定设施，则按指令要求判断该项。"
             '只输出 JSON：{"instruction_fulfilled": true/false, '
             '"target_intact": true/false, '
-            '"outside_changed": true/false, "reason": "一句话"}'
+            '"outside_changed": true/false, '
+            '"fixtures_moved": true/false, "reason": "一句话"}'
         )
         resp = await _post_with_retry(
             http, f"{BASE_URL}/chat/completions",
@@ -328,7 +333,8 @@ class LocalEditAgent:
                 report["verify"] = v
                 ok = (v.get("instruction_fulfilled") is True
                       and v.get("target_intact", True) is True
-                      and v.get("outside_changed") is not True)
+                      and v.get("outside_changed") is not True
+                      and v.get("fixtures_moved", False) is not True)
                 report["attempts"] = attempt + 1
                 if ok or attempt == self.max_retries:
                     break
