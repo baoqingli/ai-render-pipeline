@@ -4,6 +4,7 @@
 不依赖 PG/Valkey（作业注册表在进程内存，产物持久化磁盘）；可作为独立
 轻量服务启动（scripts/run_render_api.py），也可挂进主 app（app.py）。
 """
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
@@ -16,6 +17,7 @@ from app.engines.local_edit_agent import (DEFAULT_EDIT_MODEL,
 
 _INPUT_EXTS = {".dwg", ".dxf", ".png", ".jpg", ".jpeg"}
 _IMG_EXTS = {".png", ".jpg", ".jpeg"}
+_DATE_DIR_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def create_render_edit_router(output_root: Path) -> APIRouter:
@@ -146,6 +148,28 @@ def create_render_edit_router(output_root: Path) -> APIRouter:
 
         registry.spawn(job, factory)
         return {"job_id": job.id, "status": job.status}
+
+    # ── 目录浏览（front-end 缩略图枚举）──────────────────────────────────
+    @router.get("/dirs")
+    async def list_run_dirs():
+        out: list[str] = []
+        for date_dir in sorted(root.iterdir(), key=lambda p: p.name):
+            if not date_dir.is_dir() \
+                    or not _DATE_DIR_RE.fullmatch(date_dir.name):
+                continue
+            for run in sorted(date_dir.iterdir(), key=lambda p: p.name):
+                if run.is_dir():
+                    out.append(f"{date_dir.name}/{run.name}")
+        return out
+
+    @router.get("/dirs/{rel_path:path}")
+    async def list_dir_images(rel_path: str):
+        d = _safe_inside(rel_path)
+        if not d.is_dir():
+            raise HTTPException(404, f"不是目录: {rel_path}")
+        return [{"name": p.name, "url": url_of(p)}
+                for p in sorted(d.iterdir(), key=lambda x: x.name)
+                if p.is_file() and p.suffix.lower() in _IMG_EXTS]
 
     # ── 作业查询 ─────────────────────────────────────────────────────────
     @router.get("/jobs/{job_id}")
