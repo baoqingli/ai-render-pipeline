@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     valkey_url: str = "redis://localhost:6379/0"
     render_variants: int = 2
     data_dir: str = "experiments/data"
+    output_root: str = "output"        # 生成/编辑产物的输出根目录
     gemini_api_key: str | None = None
     openai_api_key: str | None = None
 

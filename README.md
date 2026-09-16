@@ -73,6 +73,27 @@ uv run python scripts/local_edit.py \
    - `ARP_VISION_MODEL=qwen/qwen3.8-flash`
 2. DWG 输入需安装 [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter)（`ARP_ODA_EXE`，默认在 PATH）
 
+## HTTP API（生成 + 局部编辑）
+
+```bash
+# 启动独立轻量服务（不依赖 PG/Valkey），默认 8100 端口
+uv run python scripts/run_render_api.py
+```
+
+```bash
+# 提交生成任务（multipart 上传图纸）→ 202 + job_id
+curl -X POST http://localhost:8100/api/v1/renders \
+  -F "file=@/tmp/plan.dxf" -F "desc=现代简约风" -F "force=true"
+# 提交局部编辑（可引用服务端已有产物，相对 output 根）
+curl -X POST http://localhost:8100/api/v1/edits \
+  -F "image_path=2026-09-16/114228/final.png" -F "instruction=把圆桌换成黑色方几"
+# 轮询任务 → succeeded 后结果含 /files/... 产物下载 URL
+curl http://localhost:8100/api/v1/jobs/<job_id>
+```
+
+注意：DWG 输入要求 API 服务进程可找到 ODA File Converter；DXF/PNG/JPG
+无此要求。详见 [HTTP API 设计](docs/http-api-design-2026-09.md)。
+
 ## 更多文档
 
 - [两Agent + gpt-image 直出渲染方案](docs/pipeline-two-agent-gpt-image.md) — 完整链路依赖、OpenRouter 生图 API 实测口径、调参红线
