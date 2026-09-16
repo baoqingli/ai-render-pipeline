@@ -16,6 +16,7 @@
 import asyncio
 import functools
 import json
+from datetime import datetime
 from pathlib import Path
 
 from app.models.tooling import ToolError, ToolResult
@@ -62,11 +63,13 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
             message=f"不支持的格式 {src.suffix}（支持 {_CAD_EXTS | _IMG_EXTS}）"))
 
     out = Path(out_dir)
-    # --out 以 .png 结尾视为"期望的最终图片路径"：目录取其父级，渲染完成后拷贝过去
-    out_file: Path | None = None
-    if out.suffix.lower() in _IMG_EXTS:
-        out_file = out
-        out = out.parent
+    # 目录约定：<根>/<日期>/<唯一运行目录>，一次运行的所有产物都在其中
+    now = datetime.now()
+    out = out / now.strftime("%Y-%m-%d") / now.strftime("%H%M%S")
+    seq = 1
+    while out.exists():   # 同秒重跑保护，保证目录唯一
+        out = out.parent / f"{out.name}_{seq}"
+        seq += 1
     out.mkdir(parents=True, exist_ok=True)
 
     # ── Stage 1: 两 Agent 管线（同步实现含内部 asyncio.run，放线程防嵌套）──
@@ -136,11 +139,13 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
         data["edited"] = str(final_image)
         data["edit_reports"] = edit_reports
 
-    if out_file and final_image:
+    # 最终成品固定命名 final.png 放运行目录根部（后续 local_edit 引用方便）
+    if final_image:
         import shutil
 
-        shutil.copy2(final_image, out_file)
-        data["render_file"] = str(out_file)
+        final_path = out / "final.png"
+        shutil.copy2(final_image, final_path)
+        data["final"] = str(final_path)
     return ToolResult(ok=True, data=data)
 
 
