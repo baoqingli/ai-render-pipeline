@@ -6,10 +6,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.api.deps import ApiDeps
+from app.api.render_edit import create_render_edit_router
 from app.infra.pg import PROJECTS, upsert_project
 
 JOB_QUEUE = "arp:jobs"
@@ -23,6 +25,14 @@ class RegenerateBody(BaseModel):
 
 def create_app(deps: ApiDeps) -> FastAPI:
     app = FastAPI(title="ai-render-pipeline")
+
+    # 生成+局部编辑业务（docs/http-api-design-2026-09.md）：/api/v1/* + /files
+    from app.core.config import get_settings
+
+    output_root = Path(get_settings().output_root).resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    app.include_router(create_render_edit_router(output_root))
+    app.mount("/files", StaticFiles(directory=output_root), name="files")
 
     @app.post("/api/projects", status_code=202)
     async def create_project(cad_file: UploadFile,

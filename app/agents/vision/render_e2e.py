@@ -16,6 +16,7 @@
 import asyncio
 import functools
 import json
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -33,7 +34,9 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
                   gpt_model: str | None = None,
                   n: int = 1,
                   desc: str | None = None,
-                  edit: str | list[str] | None = None) -> ToolResult[dict]:
+                  edit: str | list[str] | None = None,
+                  progress_cb: Callable[[str], None] | None = None) \
+        -> ToolResult[dict]:
     """一键渲染：识图 → 验证 → gpt-image 生图 →（可选）局部编辑。
 
     file_path: DWG/DXF（走确定性解析+VLM 增强）或 PNG/JPG（走 CubiCasa 分割）。
@@ -49,7 +52,17 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
                Agent，docs/local-edit-agent-plan-2026-09.md）。
     返回 ToolResult[dict]：prompt/out_dir/validation/renders/desc_prompt/
                edited/edit_reports。
+    progress_cb: 可选进度回调（HTTP API 用它更新作业 stage），阶段取值
+               vision | validation | generate | edit | done；回调异常被
+               吞掉，绝不打断业务。
     """
+
+    def _stage(s: str) -> None:
+        if progress_cb:
+            try:
+                progress_cb(s)
+            except Exception:  # noqa: BLE001 进度回调不打断业务
+                pass
     from app.agents.vision.two_agent_pipeline import run as pipeline_run
     from app.engines.gpt_image_agent import GptImageAgent
 
@@ -73,6 +86,7 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
     out.mkdir(parents=True, exist_ok=True)
 
     # ── Stage 1: 两 Agent 管线（同步实现含内部 asyncio.run，放线程防嵌套）──
+    _stage("vision")
     r = await asyncio.get_event_loop().run_in_executor(
         None, functools.partial(pipeline_run, src, out,
                                 vlm_model=model, max_iters=max_iters))
@@ -99,6 +113,7 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
                           model=gpt_model or DEFAULT_MODEL, n=n)
 
     # ── Stage 1.5: 描述编译（LLM 调用放线程，避免嵌套事件循环）───────────
+    _stage("generate")
     desc_en: str | None = None
     if desc:
         from app.agents.vision.desc_compiler import compile_desc
@@ -118,6 +133,8 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
     data["desc_prompt"] = desc_en
 
     # ── Stage 3: 局部编辑（串行迭代，每次以上一次产物为基图）───────────────
+    if edit:
+        _stage("edit")
     final_image: Path | None = Path(renders[0]) if renders else None
     if edit and final_image:
         from app.engines.local_edit_agent import LocalEditAgent
@@ -140,6 +157,7 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
         data["edit_reports"] = edit_reports
 
     # 最终成品固定命名 final.png 放运行目录根部（后续 local_edit 引用方便）
+    _stage("done")
     if final_image:
         import shutil
 
