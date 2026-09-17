@@ -2,6 +2,17 @@
 
 CAD 图纸（DWG/DXF）或户型图片（PNG/JPG）→ 两 Agent 识图验证 → AI 生图 → dollhouse 俯视 3D 渲染图，支持自然语言局部编辑精修。
 
+## 启动方式一览
+
+| 场景 | 启动命令 | 说明 |
+|---|---|---|
+| CLI 一键渲染 | `uv run python scripts/render_e2e.py --input <图纸> --force` | 出图 + 可选 `--desc`/`--edit`，详见[下文](#快速开始一键渲染) |
+| CLI 局部编辑 | `uv run python scripts/local_edit.py --image <图> --instruction "<调整>"` | 对已有渲染图精修，详见[局部编辑](#局部编辑) |
+| HTTP API 服务 | `uv run python scripts/run_render_api.py` | 生成+局部编辑接口，8100 端口，详见 [HTTP API](#http-api生成--局部编辑) |
+| 主 API 服务（旧栈） | `uv run python scripts/run_api.py` | Phase 1 项目制接口，8000 端口，需 PG/Valkey |
+
+前置要求见[前置条件](#前置条件)。
+
 ## 快速开始（一键渲染）
 
 ```bash
