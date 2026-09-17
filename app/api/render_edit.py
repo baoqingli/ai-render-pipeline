@@ -170,7 +170,7 @@ def create_render_edit_router(output_root: Path) -> APIRouter:
         return [{"name": p.name, "url": url_of(p)}
                 for p in sorted(d.iterdir(), key=lambda x: x.name)
                 if p.is_file() and p.suffix.lower() in _IMG_EXTS
-                and not p.name.startswith("_")]
+                and not p.name.startswith(("_", "mask"))]
 
     @router.get("/source/{rel_path:path}")
     async def get_source(rel_path: str):

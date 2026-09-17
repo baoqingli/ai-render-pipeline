@@ -76,6 +76,17 @@ def test_dir_images_filters_underscore_prefixed(tmp_path):
         assert names == ["final.png", "layout.png"]
 
 
+def test_dir_images_filters_edit_mask(tmp_path):
+    """局部编辑的遮罩中间产物（mask_*.png）不进缩略图列表。"""
+    _seed(tmp_path)
+    d = tmp_path / "2026-09-16" / "114228"
+    (d / "mask_1789545368.png").write_bytes(b"png")
+    with TestClient(create_render_edit_app(output_root=tmp_path)) as c:
+        names = [x["name"]
+                 for x in c.get("/api/v1/dirs/2026-09-16/114228").json()]
+        assert names == ["final.png", "layout.png"]
+
+
 def test_source_endpoint_returns_archive(tmp_path):
     _seed(tmp_path)
     d = tmp_path / "2026-09-16" / "114228"
