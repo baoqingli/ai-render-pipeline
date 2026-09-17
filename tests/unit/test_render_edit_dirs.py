@@ -63,3 +63,37 @@ def test_dir_images_escape_403(tmp_path):
     with TestClient(create_render_edit_app(output_root=tmp_path)) as c:
         r = c.get("/api/v1/dirs/%2e%2e%2fetc")
         assert r.status_code == 403
+
+
+def test_dir_images_filters_underscore_prefixed(tmp_path):
+    """_source.dwg 等下划线前缀文件是内部存档，不混入缩略图列表。"""
+    _seed(tmp_path)
+    d = tmp_path / "2026-09-16" / "114228"
+    (d / "_source.dwg").write_bytes(b"dwg")
+    with TestClient(create_render_edit_app(output_root=tmp_path)) as c:
+        names = [x["name"]
+                 for x in c.get("/api/v1/dirs/2026-09-16/114228").json()]
+        assert names == ["final.png", "layout.png"]
+
+
+def test_source_endpoint_returns_archive(tmp_path):
+    _seed(tmp_path)
+    d = tmp_path / "2026-09-16" / "114228"
+    (d / "_source.dwg").write_bytes(b"dwg")
+    with TestClient(create_render_edit_app(output_root=tmp_path)) as c:
+        r = c.get("/api/v1/source/2026-09-16/114228")
+        assert r.status_code == 200
+        assert r.json() == {
+            "name": "_source.dwg",
+            "url": "/files/2026-09-16/114228/_source.dwg"}
+
+
+def test_source_endpoint_404_without_archive(tmp_path):
+    _seed(tmp_path)  # 目录存在但没有 _source.*
+    with TestClient(create_render_edit_app(output_root=tmp_path)) as c:
+        assert c.get("/api/v1/source/2026-09-16/114228").status_code == 404
+
+
+def test_source_endpoint_missing_dir_404(tmp_path):
+    with TestClient(create_render_edit_app(output_root=tmp_path)) as c:
+        assert c.get("/api/v1/source/2026-09-16/999999").status_code == 404

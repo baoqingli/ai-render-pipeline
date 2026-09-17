@@ -27,6 +27,18 @@ _CAD_EXTS = {".dwg", ".dxf"}
 _IMG_EXTS = {".png", ".jpg", ".jpeg"}
 
 
+def archive_source(src: Path, out_dir: Path) -> None:
+    """上传原图副本（_source.<ext>）存入运行目录，供前端「用原图重新生成」。
+
+    尽力而为：存档失败（如源已消失）不打断渲染主流程。
+    """
+    import contextlib
+    import shutil
+
+    with contextlib.suppress(OSError):
+        shutil.copy2(src, out_dir / f"_source{src.suffix.lower()}")
+
+
 async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
                   model: str | None = None,
                   max_iters: int = 3,
@@ -84,6 +96,7 @@ async def run_e2e(file_path: str | Path, out_dir: str | Path, *,
         out = out.parent / f"{out.name}_{seq}"
         seq += 1
     out.mkdir(parents=True, exist_ok=True)
+    archive_source(src, out)
 
     # ── Stage 1: 两 Agent 管线（同步实现含内部 asyncio.run，放线程防嵌套）──
     _stage("vision")

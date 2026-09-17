@@ -169,7 +169,20 @@ def create_render_edit_router(output_root: Path) -> APIRouter:
             raise HTTPException(404, f"不是目录: {rel_path}")
         return [{"name": p.name, "url": url_of(p)}
                 for p in sorted(d.iterdir(), key=lambda x: x.name)
-                if p.is_file() and p.suffix.lower() in _IMG_EXTS]
+                if p.is_file() and p.suffix.lower() in _IMG_EXTS
+                and not p.name.startswith("_")]
+
+    @router.get("/source/{rel_path:path}")
+    async def get_source(rel_path: str):
+        """运行目录内的原图存档（_source.*），供前端「用原图重新生成」。"""
+        d = _safe_inside(rel_path)
+        if not d.is_dir():
+            raise HTTPException(404, f"不是目录: {rel_path}")
+        for ext in sorted(_INPUT_EXTS):
+            p = d / f"_source{ext}"
+            if p.is_file():
+                return {"name": p.name, "url": url_of(p)}
+        raise HTTPException(404, "该目录无原图存档")
 
     # ── 作业查询 ─────────────────────────────────────────────────────────
     @router.get("/jobs/{job_id}")

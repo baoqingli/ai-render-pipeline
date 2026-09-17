@@ -93,6 +93,7 @@ uv run python scripts/run_render_api.py 9000   # 自定义端口
 | POST | `/api/v1/edits` | 提交局部编辑任务 |
 | GET | `/api/v1/dirs` | 列运行子目录（`<日期>/<时分秒>`，升序） |
 | GET | `/api/v1/dirs/{path}` | 列目录下图片文件（`[{name,url}]`，仅顶层） |
+| GET | `/api/v1/source/{path}` | 运行目录的原图存档（`{name,url}`，无则 404） |
 | GET | `/api/v1/jobs/{job_id}` | 查询任务状态与结果 |
 | GET | `/api/v1/jobs?jtype=render&status=succeeded` | 任务列表（可过滤） |
 | GET | `/files/{path}` | 产物下载（相对 output 根） |
